@@ -16,12 +16,18 @@ RUN go mod download
 # Copy source code
 COPY . .
 
-# Build the binary for Linux
+# Build the binaries for Linux
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
     -ldflags "-X main.Version=$(git describe --tags --always --dirty 2>/dev/null || echo 'dev') -X main.BuildTime=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
     -a -installsuffix cgo \
     -o easy-backup \
     ./cmd/easy-backup
+
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
+    -ldflags "-X main.Version=$(git describe --tags --always --dirty 2>/dev/null || echo 'dev') -X main.BuildTime=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    -a -installsuffix cgo \
+    -o config-validator \
+    ./cmd/config-validator
 
 # Final stage
 FROM alpine:3.18
@@ -36,8 +42,9 @@ RUN apk update && apk add --no-cache \
 # Create app directory
 WORKDIR /app
 
-# Copy the binary from builder stage
+# Copy the binaries from builder stage
 COPY --from=builder /app/easy-backup /app/easy-backup
+COPY --from=builder /app/config-validator /app/config-validator
 
 # Create temp directory
 RUN mkdir -p /tmp/db-backup && chmod 755 /tmp/db-backup
