@@ -232,6 +232,20 @@ S3_BUCKET=your-backup-bucket
 1. **Bot Token**: Go to https://api.slack.com/apps → Your App → OAuth & Permissions → Bot User OAuth Token
 2. **Channel ID**: In Slack, right-click on your channel → View channel details → Copy channel ID
 
+#### Required OAuth Scopes
+
+For basic functionality, your Slack bot needs these OAuth scopes:
+
+- `chat:write` - Send messages to channels
+- `chat:write.public` - Send messages to public channels without joining
+
+Optional scopes for enhanced health checks:
+
+- `channels:read` - Read public channel information (for health check validation)
+- `groups:read` - Read private channel information (if using private channels)
+
+**Note**: The application will work with basic scopes, but may show "limited" status in health checks if advanced scopes are missing.
+
 ### Database Connection String Formats
 
 #### PostgreSQL

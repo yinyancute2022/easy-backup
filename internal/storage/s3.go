@@ -81,7 +81,7 @@ func (s3s *S3Service) UploadBackup(ctx context.Context, strategy string, localPa
 
 	// Generate S3 key
 	filename := filepath.Base(localPath)
-	s3Key := filepath.Join(s3s.config.Global.S3.BasePath, strategy, time.Now().Format("2006/01/02"), filename)
+	s3Key := filepath.Join(s3s.config.Global.S3.BasePath, strategy, filename)
 
 	s3s.logger.WithFields(logrus.Fields{
 		"strategy": strategy,
