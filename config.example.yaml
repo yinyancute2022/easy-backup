@@ -3,7 +3,12 @@ global:
     bot_token: "${SLACK_BOT_TOKEN}"
     channel_id: "${SLACK_CHANNEL_ID}" # Slack channel ID (e.g., C1234567890)
   log_level: "info"
-  schedule: "1d"
+  # Schedule using cron expression format:
+  # - "0 2 * * *" (daily at 2 AM)
+  # - "*/15 * * * *" (every 15 minutes)
+  # - "0 */6 * * *" (every 6 hours)
+  # - "0 0 * * 0" (weekly on Sunday at midnight)
+  schedule: "0 2 * * *" # Daily at 2 AM UTC
   retention: "30d"
   timezone: "UTC"
   temp_dir: "/tmp/db-backup"
@@ -34,16 +39,19 @@ strategies:
   - name: "postgres-prod"
     database_type: "postgres" # Options: postgres, mysql, mariadb, mongodb
     database_url: "${POSTGRES_DATABASE_URL}"
-    schedule: "6h"
+    # Cron format: every 6 hours starting at 3 AM
+    schedule: "0 3,9,15,21 * * *"
     slack:
       channel_id: "${SLACK_CRITICAL_CHANNEL_ID}" # Override for critical alerts
 
   - name: "mysql-app"
     database_type: "mysql"
     database_url: "${MYSQL_DATABASE_URL}"
-    schedule: "12h"
+    # Every 12 hours (at midnight and noon)
+    schedule: "0 0,12 * * *"
 
   - name: "mongodb-logs"
     database_type: "mongodb"
     database_url: "${MONGODB_DATABASE_URL}"
-    schedule: "1d"
+    # Daily at 1 AM
+    schedule: "0 1 * * *"

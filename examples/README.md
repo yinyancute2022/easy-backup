@@ -82,7 +82,7 @@ docker compose logs -f easy-backup
 - **Username**: testuser
 - **Password**: testpass
 - **Tables**: users, posts, comments
-- **Backup Schedule**: Every 1 minute
+- **Backup Schedule**: Every 1 minute (using cron: `*/1 * * * *`)
 - **Retention**: 10 minutes
 
 ### MySQL Database
@@ -92,7 +92,7 @@ docker compose logs -f easy-backup
 - **Username**: testuser
 - **Password**: testpass
 - **Tables**: users, posts, comments
-- **Backup Schedule**: Every 2 minutes
+- **Backup Schedule**: Every 1 minute (using cron: `*/1 * * * *`)
 - **Retention**: 15 minutes
 
 ### MongoDB Database
@@ -102,7 +102,7 @@ docker compose logs -f easy-backup
 - **Username**: testuser
 - **Password**: testpass
 - **Collections**: users, posts, comments
-- **Backup Schedule**: Every 3 minutes
+- **Backup Schedule**: Every 1 minute (using cron: `*/1 * * * *`)
 - **Retention**: 20 minutes
 
 ### MinIO S3 Storage
@@ -194,7 +194,7 @@ The example uses the following configuration:
 
 ```yaml
 global:
-  schedule: "1m" # Backup every minute
+  schedule: "*/1 * * * *" # Backup every minute
   retention: "10m" # Keep backups for 10 minutes
   log_level: "info"
 
@@ -205,7 +205,7 @@ global:
 strategies:
   - name: "demo-database"
     database_url: "postgres://testuser:testpass@postgres:5432/testdb?sslmode=disable"
-    schedule: "1m"
+    schedule: "*/1 * * * *"
     retention: "10m"
 ```
 
@@ -309,10 +309,10 @@ Configure different backup frequencies:
 ```yaml
 strategies:
   - name: "critical-db"
-    schedule: "30s" # Every 30 seconds
+    schedule: "*/1 * * * *" # Every minute (for demo purposes)
     retention: "5m" # 5 minute retention
   - name: "regular-db"
-    schedule: "5m" # Every 5 minutes
+    schedule: "*/5 * * * *" # Every 5 minutes
     retention: "30m" # 30 minute retention
 ```
 
