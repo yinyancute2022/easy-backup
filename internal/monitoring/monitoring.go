@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -153,14 +154,22 @@ func (ms *MonitoringService) healthCheckHandler(w http.ResponseWriter, r *http.R
 
 	slackStatus := "ok"
 	if err := ms.slackService.TestConnection(ctx); err != nil {
-		slackStatus = "error"
-		ms.logger.WithError(err).Warn("Slack health check failed")
+		// Check if it's a scope issue vs a real connectivity issue
+		if strings.Contains(err.Error(), "missing_scope") {
+			slackStatus = "limited" // New status for scope limitations
+			ms.logger.WithError(err).Info("Slack health check shows limited permissions - basic functionality should work")
+		} else {
+			slackStatus = "error"
+			ms.logger.WithError(err).Warn("Slack health check failed")
+		}
 	}
 
 	// Determine overall health
 	overallStatus := "healthy"
 	if s3Status == "error" || slackStatus == "error" {
 		overallStatus = "degraded"
+	} else if slackStatus == "limited" {
+		overallStatus = "healthy" // Limited Slack permissions don't degrade overall health
 	}
 
 	// Get strategy status

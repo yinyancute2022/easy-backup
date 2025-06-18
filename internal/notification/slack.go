@@ -438,14 +438,23 @@ func (ss *SlackService) TestConnection(ctx context.Context) error {
 
 	// Validate channel access if channel ID is configured
 	if ss.config.Global.Slack.ChannelID != "" {
+		// Try to get conversation info, but don't fail if we don't have the scope
 		_, err := ss.client.GetConversationInfoContext(ctx, &slack.GetConversationInfoInput{
 			ChannelID: ss.config.Global.Slack.ChannelID,
 		})
 		if err != nil {
-			return fmt.Errorf("failed to access Slack channel %s: %w", ss.config.Global.Slack.ChannelID, err)
+			// Check if it's a scope issue - if so, just log a warning instead of failing
+			if strings.Contains(err.Error(), "missing_scope") {
+				ss.logger.WithFields(logrus.Fields{
+					"channel_id": ss.config.Global.Slack.ChannelID,
+					"error":      err.Error(),
+				}).Warn("Cannot verify channel access due to missing OAuth scope - this is normal for basic bot tokens")
+			} else {
+				return fmt.Errorf("failed to access Slack channel %s: %w", ss.config.Global.Slack.ChannelID, err)
+			}
+		} else {
+			ss.logger.WithField("channel_id", ss.config.Global.Slack.ChannelID).Info("Slack channel access verified")
 		}
-
-		ss.logger.WithField("channel_id", ss.config.Global.Slack.ChannelID).Info("Slack channel access verified")
 	}
 
 	return nil
