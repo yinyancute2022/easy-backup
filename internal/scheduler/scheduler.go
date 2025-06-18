@@ -149,7 +149,14 @@ func (ss *SchedulerService) executeBackupJob(strategy config.StrategyConfig) {
 			}
 		}
 
-		result, lastErr = ss.backupService.ExecuteBackup(ss.ctx, strategy)
+		result, lastErr = ss.backupService.ExecuteBackupWithProgress(ss.ctx, strategy, func(strategyName, message string) {
+			// Send database output to Slack
+			if thread != nil {
+				if err := ss.slackService.SendDatabaseOutput(ss.ctx, thread, strategyName, message); err != nil {
+					ss.logger.WithError(err).Warn("Failed to send database output to Slack")
+				}
+			}
+		})
 		if lastErr == nil {
 			break
 		}
@@ -158,11 +165,19 @@ func (ss *SchedulerService) executeBackupJob(strategy config.StrategyConfig) {
 			"strategy": strategy.Name,
 			"attempt":  attempt,
 		}).Warn("Backup attempt failed")
+
+		// Send progress update about the failed attempt
+		if thread != nil && attempt < ss.config.Global.Retry.MaxAttempts {
+			failureMsg := fmt.Sprintf("Attempt %d/%d failed: %s", attempt, ss.config.Global.Retry.MaxAttempts, lastErr.Error())
+			if err := ss.slackService.SendBackupProgress(ss.ctx, thread, strategy.Name, failureMsg); err != nil {
+				ss.logger.WithError(err).Warn("Failed to send backup progress notification")
+			}
+		}
 	}
 
 	if lastErr != nil {
 		// All attempts failed
-		ss.handleBackupFailure(strategy, lastErr, thread)
+		ss.handleBackupFailure(strategy, lastErr, result, thread)
 		return
 	}
 
@@ -176,7 +191,7 @@ func (ss *SchedulerService) executeBackupJob(strategy config.StrategyConfig) {
 	s3Location, err := ss.s3Service.UploadBackup(ss.ctx, strategy.Name, result.BackupPath)
 	if err != nil {
 		ss.logger.WithError(err).WithField("strategy", strategy.Name).Error("Failed to upload backup to S3")
-		ss.handleBackupFailure(strategy, err, thread)
+		ss.handleBackupFailure(strategy, err, nil, thread)
 		return
 	}
 
@@ -223,7 +238,7 @@ func (ss *SchedulerService) executeBackupJob(strategy config.StrategyConfig) {
 }
 
 // handleBackupFailure handles backup failures
-func (ss *SchedulerService) handleBackupFailure(strategy config.StrategyConfig, err error, thread *notification.ThreadInfo) {
+func (ss *SchedulerService) handleBackupFailure(strategy config.StrategyConfig, err error, result *backup.BackupResult, thread *notification.ThreadInfo) {
 	ss.logger.WithError(err).WithField("strategy", strategy.Name).Error("Backup failed after all retry attempts")
 
 	// Update metrics and status
@@ -239,13 +254,33 @@ func (ss *SchedulerService) handleBackupFailure(strategy config.StrategyConfig, 
 
 	// Send failure notification
 	if thread != nil {
-		failedResult := &backup.BackupResult{
-			Strategy: strategy.Name,
-			Success:  false,
-			Error:    err,
+		var failedResult *backup.BackupResult
+		if result != nil {
+			// Use the actual backup result with command logs
+			failedResult = result
+			failedResult.Success = false
+			failedResult.Error = err
+		} else {
+			// Fallback to creating a minimal result
+			failedResult = &backup.BackupResult{
+				Strategy:  strategy.Name,
+				Success:   false,
+				Error:     err,
+				StartTime: time.Now(),
+				EndTime:   time.Now(),
+			}
 		}
+
+		// Send the main backup result notification
 		if err := ss.slackService.SendBackupResult(ss.ctx, thread, []*backup.BackupResult{failedResult}, false); err != nil {
 			ss.logger.WithError(err).Warn("Failed to send backup failure notification")
+		}
+
+		// Send detailed error information for debugging if we have a result with command logs
+		if result != nil && len(result.CommandLogs) > 0 {
+			if err := ss.slackService.SendDetailedError(ss.ctx, thread, strategy.Name, failedResult); err != nil {
+				ss.logger.WithError(err).Warn("Failed to send detailed error information")
+			}
 		}
 	}
 }

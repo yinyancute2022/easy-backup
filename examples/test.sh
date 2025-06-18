@@ -65,12 +65,28 @@ else
   docker compose logs postgres
 fi
 
+# Test MySQL
+if docker exec example-mysql mysqladmin ping -h localhost -u testuser -ptestpass >/dev/null 2>&1; then
+  echo "✅ MySQL is working"
+else
+  echo "❌ MySQL failed"
+  docker compose logs mysql
+fi
+
+# Test MongoDB
+if docker exec example-mongodb mongosh --eval "db.adminCommand('ping')" >/dev/null 2>&1; then
+  echo "✅ MongoDB is working"
+else
+  echo "❌ MongoDB failed"
+  docker compose logs mongodb
+fi
+
 # Check for backup files (wait a bit for first backup)
 echo "⏳ Waiting for first backup to complete..."
 sleep 90
 
 echo "📁 Checking for backup files..."
-if docker exec example-minio mc ls myminio/backup-bucket/demo-backups/ --recursive 2>/dev/null | grep -q ".sql.gz"; then
+if docker exec example-minio mc ls myminio/backup-bucket/demo-backups/ --recursive 2>/dev/null | grep -E "\.(sql\.gz|tar\.gz)$"; then
   echo "✅ Backup files found in MinIO"
   docker exec example-minio mc ls myminio/backup-bucket/demo-backups/ --recursive
 else
@@ -84,16 +100,35 @@ curl -s http://localhost:8080/health | jq '.' 2>/dev/null || curl -s http://loca
 
 # Show database stats
 echo "📊 Database stats:"
+
+echo "PostgreSQL:"
 docker exec example-postgres psql -U testuser -d testdb -c "
 SELECT
     'users' as table_name, COUNT(*) as count FROM users
 UNION ALL
 SELECT
-    'orders' as table_name, COUNT(*) as count FROM orders
+    'posts' as table_name, COUNT(*) as count FROM posts
 UNION ALL
 SELECT
-    'audit_log' as table_name, COUNT(*) as count FROM audit_log
+    'comments' as table_name, COUNT(*) as count FROM comments
 ORDER BY table_name;
+"
+
+echo "MySQL:"
+docker exec example-mysql mysql -u testuser -ptestpass testdb -e "
+SELECT 'users' as table_name, COUNT(*) as count FROM users
+UNION ALL
+SELECT 'posts' as table_name, COUNT(*) as count FROM posts
+UNION ALL
+SELECT 'comments' as table_name, COUNT(*) as count FROM comments
+ORDER BY table_name;
+"
+
+echo "MongoDB:"
+docker exec example-mongodb mongosh -u testuser -p testpass --authenticationDatabase testdb testdb --eval "
+print('users: ' + db.users.countDocuments());
+print('posts: ' + db.posts.countDocuments());
+print('comments: ' + db.comments.countDocuments());
 "
 
 echo "🎉 Example test completed successfully!"

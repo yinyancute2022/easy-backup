@@ -34,9 +34,12 @@ Project name easy backup
 
 #### Database Support
 
-- PostgreSQL backup using `pg_dump` and `pg_restore`
+- **PostgreSQL** backup using `pg_dump` and `pg_restore`
+- **MySQL/MariaDB** backup using `mysqldump`
+- **MongoDB** backup using `mongodump` with tar.gz compression
 - Support multiple database URLs
 - Support database connections through SSH tunnels or proxies
+- Automatic database type detection based on configuration
 
 #### Backup Management
 
@@ -106,18 +109,21 @@ global:
       path: "/health"
 
 strategies:
-  - name: "production-db"
+  - name: "production-postgres"
+    database_type: "postgres" # Required: postgres, mysql, mariadb, or mongodb
     database_url: "postgres://user:pass@prod-db:5432/myapp"
     schedule: "6h" # Override global schedule
     slack:
       channel_id: "C9876543210" # Override global channel ID
 
-  - name: "staging-db"
-    database_url: "postgres://user:pass@staging-db:5432/myapp"
+  - name: "mysql-app"
+    database_type: "mysql"
+    database_url: "mysql://user:pass@mysql-db:3306/appdb"
     # Uses global defaults for schedule and slack channel
 
-  - name: "analytics-db"
-    database_url: "postgres://user:pass@analytics-db:5432/analytics"
+  - name: "mongodb-logs"
+    database_type: "mongodb"
+    database_url: "mongodb://user:pass@mongodb:27017/logs"
     schedule: "12h"
     retention: "7d"
 ```
@@ -134,17 +140,17 @@ The health check endpoint returns JSON status:
   "strategies": {
     "total": 3,
     "last_backup_status": {
-      "production-db": {
+      "production-postgres": {
         "status": "success",
         "last_run": "2025-06-17T06:00:00Z",
         "next_run": "2025-06-17T12:00:00Z"
       },
-      "staging-db": {
+      "mysql-app": {
         "status": "success",
         "last_run": "2025-06-17T00:00:00Z",
         "next_run": "2025-06-18T00:00:00Z"
       },
-      "analytics-db": {
+      "mongodb-logs": {
         "status": "failed",
         "last_run": "2025-06-17T00:00:00Z",
         "next_run": "2025-06-17T12:00:00Z",
@@ -179,6 +185,9 @@ SLACK_CHANNEL_ID=C0123456789ABCDEF
 
 # Database Configuration
 DATABASE_URL=postgres://user:pass@host:port/database
+POSTGRES_DATABASE_URL=postgres://user:pass@host:port/database
+MYSQL_DATABASE_URL=mysql://user:pass@host:port/database
+MONGODB_DATABASE_URL=mongodb://user:pass@host:port/database
 
 # S3 Configuration
 AWS_ACCESS_KEY_ID=your-access-key
@@ -191,7 +200,47 @@ S3_BUCKET=your-backup-bucket
 1. **Bot Token**: Go to https://api.slack.com/apps → Your App → OAuth & Permissions → Bot User OAuth Token
 2. **Channel ID**: In Slack, right-click on your channel → View channel details → Copy channel ID
 
-## Future Enhancements
+### Database Connection String Formats
 
-- Add MySQL backup support
-- Add MongoDB backup support
+#### PostgreSQL
+
+```
+postgres://username:password@hostname:port/database
+postgresql://username:password@hostname:port/database
+```
+
+#### MySQL/MariaDB
+
+```
+mysql://username:password@hostname:port/database
+```
+
+#### MongoDB
+
+```
+mongodb://username:password@hostname:port/database
+mongodb+srv://username:password@hostname/database  # MongoDB Atlas
+```
+
+**Note**: For special characters in passwords, use URL encoding (e.g., `%40` for `@`, `%23` for `#`).
+
+## Example Environment
+
+The `examples/` directory contains a complete Docker Compose environment demonstrating:
+
+- **Multi-Database Support**: PostgreSQL, MySQL, and MongoDB running simultaneously
+- **Data Generation**: Realistic sample data continuously generated for all databases
+- **Different Backup Schedules**: Each database backed up at different intervals
+- **S3 Storage**: MinIO provides S3-compatible storage for backups
+- **Monitoring**: Health checks and metrics endpoints for monitoring
+
+To run the example:
+
+```bash
+cd examples
+cp .env.example .env
+# Edit .env with your Slack credentials
+docker compose up -d
+```
+
+See `examples/README.md` for detailed instructions.

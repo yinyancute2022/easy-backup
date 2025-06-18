@@ -85,11 +85,12 @@ type HealthCheckConfig struct {
 
 // StrategyConfig contains configuration for a specific backup strategy
 type StrategyConfig struct {
-	Name        string      `yaml:"name"`
-	DatabaseURL string      `yaml:"database_url"`
-	Schedule    string      `yaml:"schedule,omitempty"`
-	Retention   string      `yaml:"retention,omitempty"`
-	Slack       SlackConfig `yaml:"slack,omitempty"`
+	Name         string      `yaml:"name"`
+	DatabaseType string      `yaml:"database_type"` // postgres, mysql, mongodb
+	DatabaseURL  string      `yaml:"database_url"`
+	Schedule     string      `yaml:"schedule,omitempty"`
+	Retention    string      `yaml:"retention,omitempty"`
+	Slack        SlackConfig `yaml:"slack,omitempty"`
 }
 
 // LoadConfig loads configuration from a YAML file
@@ -188,6 +189,16 @@ func setDefaults(config *Config) error {
 	// Apply global defaults to strategies
 	for i := range config.Strategies {
 		strategy := &config.Strategies[i]
+		if strategy.DatabaseType == "" {
+			strategy.DatabaseType = "postgres" // Default to postgres for backward compatibility
+		}
+		// Validate database type
+		switch strategy.DatabaseType {
+		case "postgres", "mysql", "mariadb", "mongodb":
+			// Valid database types
+		default:
+			return fmt.Errorf("unsupported database type '%s' for strategy '%s'. Supported types: postgres, mysql, mariadb, mongodb", strategy.DatabaseType, strategy.Name)
+		}
 		if strategy.Schedule == "" {
 			strategy.Schedule = config.Global.Schedule
 		}
