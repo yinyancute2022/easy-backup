@@ -32,9 +32,22 @@ global:
       path: "/health"
 
 strategies:
-  - name: "demo-database"
-    database_url: "${DATABASE_URL}"
+  - name: "postgres-database"
+    database_type: "postgres"
+    database_url: "${POSTGRES_DATABASE_URL}"
     schedule: "1m" # Override to backup every minute
     retention: "10m" # Keep only last 10 minutes of backups
-    slack:
-      channel_id: "C06EAHNLB7X" # Specific channel ID for backup demo
+    # slack:
+    #   channel_id: "C06EAHNLB7X" # Specific channel ID for backup demo
+
+  - name: "mysql-database"
+    database_type: "mysql"
+    database_url: "${MYSQL_DATABASE_URL}"
+    schedule: "1m"
+    retention: "15m"
+
+  - name: "mongodb-database"
+    database_type: "mongodb"
+    database_url: "${MONGODB_DATABASE_URL}"
+    schedule: "1m"
+    retention: "20m"

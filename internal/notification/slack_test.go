@@ -383,3 +383,125 @@ func TestSlackService_SendBackupStarted_MessageFormat(t *testing.T) {
 	// The actual message content verification would require mocking the Slack client,
 	// but we can at least verify the method doesn't panic
 }
+
+func TestSlackService_SendDatabaseOutput(t *testing.T) {
+	tests := []struct {
+		name        string
+		output      string
+		shouldSend  bool
+		description string
+	}{
+		{
+			name:        "error_output",
+			output:      "ERROR: Connection failed to database",
+			shouldSend:  true,
+			description: "Should send database error output",
+		},
+		{
+			name:        "warning_output",
+			output:      "WARNING: Table 'logs' is very large",
+			shouldSend:  true,
+			description: "Should send database warning output",
+		},
+		{
+			name:        "fatal_output",
+			output:      "FATAL: Authentication failed",
+			shouldSend:  true,
+			description: "Should send database fatal error output",
+		},
+		{
+			name:        "success_output",
+			output:      "Dumping table users... done",
+			shouldSend:  false,
+			description: "Should NOT send database success output",
+		},
+		{
+			name:        "info_output",
+			output:      "Processing 1000 records",
+			shouldSend:  false,
+			description: "Should NOT send database info output",
+		},
+		{
+			name:        "empty_output",
+			output:      "",
+			shouldSend:  false,
+			description: "Should handle empty output gracefully",
+		},
+		{
+			name:        "whitespace_output",
+			output:      "   \n\t  ",
+			shouldSend:  false,
+			description: "Should handle whitespace-only output gracefully",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &config.Config{
+				Global: config.GlobalConfig{
+					Slack: config.SlackConfig{
+						BotToken: "fake-test-token-not-real-slack-secret-123456789012",
+					},
+				},
+			}
+
+			service := NewSlackService(cfg)
+			ctx := context.Background()
+
+			thread := &ThreadInfo{
+				Channel:   "C1234567890",
+				Timestamp: "1234567890.123456",
+			}
+
+			err := service.SendDatabaseOutput(ctx, thread, "test-strategy", tt.output)
+
+			if tt.shouldSend {
+				// For error/warning messages, we expect an API error due to fake token
+				t.Logf("Expected API error for %s: %v", tt.name, err)
+				assert.Error(t, err, tt.description)
+			} else {
+				// For non-error messages, the method should return nil without sending
+				assert.NoError(t, err, tt.description)
+			}
+		})
+	}
+
+	// Test with no client
+	t.Run("no_client", func(t *testing.T) {
+		cfg := &config.Config{
+			Global: config.GlobalConfig{
+				Slack: config.SlackConfig{
+					BotToken: "", // No token
+				},
+			},
+		}
+
+		service := NewSlackService(cfg)
+		ctx := context.Background()
+
+		thread := &ThreadInfo{
+			Channel:   "C1234567890",
+			Timestamp: "1234567890.123456",
+		}
+
+		err := service.SendDatabaseOutput(ctx, thread, "test-strategy", "Some output")
+		assert.NoError(t, err, "Should handle no client gracefully")
+	})
+
+	// Test with nil thread
+	t.Run("nil_thread", func(t *testing.T) {
+		cfg := &config.Config{
+			Global: config.GlobalConfig{
+				Slack: config.SlackConfig{
+					BotToken: "fake-test-token-not-real-slack-secret-123456789012",
+				},
+			},
+		}
+
+		service := NewSlackService(cfg)
+		ctx := context.Background()
+
+		err := service.SendDatabaseOutput(ctx, nil, "test-strategy", "Some output")
+		assert.NoError(t, err, "Should handle nil thread gracefully")
+	})
+}

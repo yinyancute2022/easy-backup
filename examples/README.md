@@ -3,9 +3,11 @@
 This example demonstrates the Easy Backup tool in action with a complete environment including:
 
 - **PostgreSQL Database** - With sample tables and data
+- **MySQL Database** - With sample tables and data
+- **MongoDB Database** - With sample collections and documents
 - **MinIO S3 Storage** - S3-compatible object storage for backups
-- **Data Generator** - Continuously inserts random data into the database
-- **Easy Backup Service** - Performs backups every minute with 10-minute retention
+- **Data Generators** - Continuously insert random data into all databases
+- **Easy Backup Service** - Performs backups of all databases with different schedules
 
 ## Quick Start
 
@@ -36,6 +38,9 @@ Example `.env` file:
 ```bash
 # Database Configuration
 DATABASE_URL=postgres://testuser:testpass@postgres:5432/testdb?sslmode=disable
+POSTGRES_DATABASE_URL=postgres://testuser:testpass@postgres:5432/testdb?sslmode=disable
+MYSQL_DATABASE_URL=mysql://testuser:testpass@mysql:3306/testdb
+MONGODB_DATABASE_URL=mongodb://testuser:testpass@mongodb:27017/testdb
 
 # S3/MinIO Configuration
 AWS_ACCESS_KEY_ID=minioadmin
@@ -76,7 +81,29 @@ docker compose logs -f easy-backup
 - **Database**: testdb
 - **Username**: testuser
 - **Password**: testpass
-- **Tables**: users, orders, audit_log, app_settings
+- **Tables**: users, posts, comments
+- **Backup Schedule**: Every 1 minute
+- **Retention**: 10 minutes
+
+### MySQL Database
+
+- **Port**: 3306
+- **Database**: testdb
+- **Username**: testuser
+- **Password**: testpass
+- **Tables**: users, posts, comments
+- **Backup Schedule**: Every 2 minutes
+- **Retention**: 15 minutes
+
+### MongoDB Database
+
+- **Port**: 27017
+- **Database**: testdb
+- **Username**: testuser
+- **Password**: testpass
+- **Collections**: users, posts, comments
+- **Backup Schedule**: Every 3 minutes
+- **Retention**: 20 minutes
 
 ### MinIO S3 Storage
 
@@ -91,14 +118,14 @@ docker compose logs -f easy-backup
 
 - **Health Check**: http://localhost:8080/health
 - **Metrics**: http://localhost:8080/metrics
-- **Backup Frequency**: Every 1 minute
-- **Retention**: 10 minutes
+- **Supported Databases**: PostgreSQL, MySQL, MongoDB
 
-### Data Generator
+### Data Generators
 
-- Inserts random users and orders every 30 seconds
-- Updates existing orders randomly
-- Maintains audit trail of all changes
+- **PostgreSQL Generator**: Inserts random users, posts, and comments every 30 seconds
+- **MySQL Generator**: Inserts random users, posts, and comments every 30 seconds
+- **MongoDB Generator**: Inserts random users, posts, and comments every 30 seconds
+- All generators create realistic sample data for testing backup functionality
 
 ## Accessing Services
 
@@ -121,8 +148,34 @@ docker exec -it example-postgres psql -U testuser -d testdb
 
 # Check current data
 SELECT COUNT(*) FROM users;
-SELECT COUNT(*) FROM orders;
-SELECT COUNT(*) FROM audit_log;
+SELECT COUNT(*) FROM posts;
+SELECT COUNT(*) FROM comments;
+```
+
+```bash
+# Connect to MySQL
+docker exec -it example-mysql mysql -u testuser -ptestpass testdb
+
+# View tables
+SHOW TABLES;
+
+# Check current data
+SELECT COUNT(*) FROM users;
+SELECT COUNT(*) FROM posts;
+SELECT COUNT(*) FROM comments;
+```
+
+```bash
+# Connect to MongoDB
+docker exec -it example-mongodb mongosh -u testuser -p testpass --authenticationDatabase testdb testdb
+
+# View collections
+show collections
+
+# Check current data
+db.users.countDocuments()
+db.posts.countDocuments()
+db.comments.countDocuments()
 ```
 
 ### Health Check

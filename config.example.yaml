@@ -31,8 +31,19 @@ global:
       path: "/health"
 
 strategies:
-  - name: "example-db"
-    database_url: "${DATABASE_URL}"
+  - name: "postgres-prod"
+    database_type: "postgres" # Options: postgres, mysql, mariadb, mongodb
+    database_url: "${POSTGRES_DATABASE_URL}"
     schedule: "6h"
     slack:
       channel_id: "${SLACK_CRITICAL_CHANNEL_ID}" # Override for critical alerts
+
+  - name: "mysql-app"
+    database_type: "mysql"
+    database_url: "${MYSQL_DATABASE_URL}"
+    schedule: "12h"
+
+  - name: "mongodb-logs"
+    database_type: "mongodb"
+    database_url: "${MONGODB_DATABASE_URL}"
+    schedule: "1d"

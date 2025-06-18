@@ -30,11 +30,14 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
     ./cmd/config-validator
 
 # Final stage
-FROM alpine:3.18
+FROM alpine:3.22
 
 # Install required packages
 RUN apk update && apk add --no-cache \
-    postgresql-client \
+    postgresql17-client \
+    mariadb-client \
+    mariadb-connector-c-dev \
+    mongodb-tools \
     ca-certificates \
     tzdata \
     wget

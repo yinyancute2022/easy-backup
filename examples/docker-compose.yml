@@ -18,6 +18,55 @@ services:
       timeout: 5s
       retries: 5
 
+  # MySQL Database
+  mysql:
+    image: mysql:8.0
+    container_name: example-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpass
+      MYSQL_DATABASE: testdb
+      MYSQL_USER: testuser
+      MYSQL_PASSWORD: testpass
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./init-mysql.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "mysqladmin",
+          "ping",
+          "-h",
+          "localhost",
+          "-u",
+          "testuser",
+          "-ptestpass",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # MongoDB Database
+  mongodb:
+    image: mongo:7.0
+    container_name: example-mongodb
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: testuser
+      MONGO_INITDB_ROOT_PASSWORD: testpass
+      MONGO_INITDB_DATABASE: testdb
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+      - ./init-mongo.js:/docker-entrypoint-initdb.d/init.js
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
   # MinIO (S3-compatible storage)
   minio:
     image: minio/minio:latest
@@ -53,9 +102,9 @@ services:
       "
 
   # Data Generator - Inserts random data into PostgreSQL
-  data-generator:
+  postgres-data-generator:
     image: postgres:15-alpine
-    container_name: example-data-generator
+    container_name: example-postgres-data-generator
     depends_on:
       postgres:
         condition: service_healthy
@@ -76,6 +125,54 @@ services:
       done
       "
 
+  # MySQL Data Generator - Inserts random data into MySQL
+  mysql-data-generator:
+    image: mysql:8.0
+    container_name: example-mysql-data-generator
+    depends_on:
+      mysql:
+        condition: service_healthy
+    environment:
+      MYSQL_HOST: mysql
+      MYSQL_PORT: 3306
+      MYSQL_DATABASE: testdb
+      MYSQL_USER: testuser
+      MYSQL_PASSWORD: testpass
+    volumes:
+      - ./generate-mysql-data.sh:/generate-mysql-data.sh
+    command: >
+      /bin/sh -c "
+      chmod +x /generate-mysql-data.sh;
+      while true; do
+        /generate-mysql-data.sh;
+        sleep 30;
+      done
+      "
+
+  # MongoDB Data Generator - Inserts random data into MongoDB
+  mongodb-data-generator:
+    image: mongo:7.0
+    container_name: example-mongodb-data-generator
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    environment:
+      MONGO_HOST: mongodb
+      MONGO_PORT: 27017
+      MONGO_DATABASE: testdb
+      MONGO_USER: testuser
+      MONGO_PASSWORD: testpass
+    volumes:
+      - ./generate-mongo-data.sh:/generate-mongo-data.sh
+    command: >
+      /bin/sh -c "
+      chmod +x /generate-mongo-data.sh;
+      while true; do
+        /generate-mongo-data.sh;
+        sleep 30;
+      done
+      "
+
   # Easy Backup Service
   easy-backup:
     build:
@@ -84,6 +181,10 @@ services:
     container_name: example-easy-backup
     depends_on:
       postgres:
+        condition: service_healthy
+      mysql:
+        condition: service_healthy
+      mongodb:
         condition: service_healthy
       minio-setup:
         condition: service_completed_successfully
@@ -110,6 +211,8 @@ services:
 
 volumes:
   postgres_data:
+  mysql_data:
+  mongodb_data:
   minio_data:
 
 networks:

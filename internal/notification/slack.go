@@ -78,8 +78,24 @@ func (ss *SlackService) SendBackupStarted(ctx context.Context, strategies []stri
 		return nil, nil
 	}
 
-	message := fmt.Sprintf("🔄 **Database Backup Started**\n\nStrategies: %v\nStarted at: %s\n\n_This message will be updated with the final status..._",
-		strategies, time.Now().Format("2006-01-02 15:04:05 UTC"))
+	var message string
+	if len(strategies) == 1 {
+		message = fmt.Sprintf("🔄 **Database Backup Started**\n\n"+
+			"**Strategy:** %s\n"+
+			"**Started at:** %s\n\n"+
+			"_This message will be updated with the final status..._",
+			strategies[0],
+			time.Now().Format("2006-01-02 15:04:05 UTC"))
+	} else {
+		message = fmt.Sprintf("🔄 **Database Backups Started**\n\n"+
+			"**Total Strategies:** %d\n"+
+			"**Strategies:** %s\n"+
+			"**Started at:** %s\n\n"+
+			"_This message will be updated with the final status..._",
+			len(strategies),
+			strings.Join(strategies, ", "),
+			time.Now().Format("2006-01-02 15:04:05 UTC"))
+	}
 
 	timestamp, err := ss.sendMessage(ctx, slackConfig.ChannelID, message)
 	if err != nil {
@@ -98,7 +114,24 @@ func (ss *SlackService) SendBackupProgress(ctx context.Context, thread *ThreadIn
 		return nil
 	}
 
-	progressMessage := fmt.Sprintf("📊 **%s**: %s", strategy, message)
+	// Determine the icon based on message content
+	var icon string
+	messageLower := strings.ToLower(message)
+	if strings.Contains(messageLower, "error") || strings.Contains(messageLower, "failed") || strings.Contains(messageLower, "failure") {
+		icon = "❌"
+	} else if strings.Contains(messageLower, "retry") || strings.Contains(messageLower, "retrying") {
+		icon = "🔄"
+	} else if strings.Contains(messageLower, "uploading") {
+		icon = "📤"
+	} else if strings.Contains(messageLower, "cleaning") || strings.Contains(messageLower, "cleanup") {
+		icon = "🧹"
+	} else if strings.Contains(messageLower, "completed") || strings.Contains(messageLower, "success") {
+		icon = "✅"
+	} else {
+		icon = "📊"
+	}
+
+	progressMessage := fmt.Sprintf("%s **%s**: %s", icon, strategy, message)
 	_, err := ss.sendThreadMessage(ctx, thread.Channel, thread.Timestamp, progressMessage)
 	return err
 }
@@ -133,8 +166,45 @@ func (ss *SlackService) SendBackupResult(ctx context.Context, thread *ThreadInfo
 		if result.Success {
 			message += fmt.Sprintf("   • Duration: %v\n", result.Duration.Round(time.Second))
 			message += fmt.Sprintf("   • Size: %s\n", formatBytes(result.Size))
-		} else if result.Error != nil {
-			message += fmt.Sprintf("   • Error: %s\n", result.Error.Error())
+			if result.BackupPath != "" {
+				message += fmt.Sprintf("   • File: %s\n", result.BackupPath)
+			}
+			// Note: Database output is only shown for failed backups
+		} else {
+			// Enhanced error information for failed backups
+			if result.Error != nil {
+				message += fmt.Sprintf("   • **Error**: %s\n", result.Error.Error())
+			}
+
+			if result.Duration > 0 {
+				message += fmt.Sprintf("   • Duration before failure: %v\n", result.Duration.Round(time.Second))
+			}
+
+			if !result.StartTime.IsZero() {
+				message += fmt.Sprintf("   • Started at: %s\n", result.StartTime.Format("15:04:05 UTC"))
+			}
+
+			if !result.EndTime.IsZero() {
+				message += fmt.Sprintf("   • Failed at: %s\n", result.EndTime.Format("15:04:05 UTC"))
+			}
+
+			// Include command logs if available
+			if len(result.CommandLogs) > 0 {
+				message += "   • **Command Details**:\n"
+				for _, cmdLog := range result.CommandLogs {
+					// Truncate very long output to avoid Slack message limits
+					if len(cmdLog) > 500 {
+						cmdLog = cmdLog[:497] + "..."
+					}
+					// Format command logs with proper indentation
+					lines := strings.Split(cmdLog, "\n")
+					for _, line := range lines {
+						if strings.TrimSpace(line) != "" {
+							message += fmt.Sprintf("     `%s`\n", line)
+						}
+					}
+				}
+			}
 		}
 		message += "\n"
 	}
@@ -149,12 +219,91 @@ func (ss *SlackService) SendBackupResult(ctx context.Context, thread *ThreadInfo
 
 	// Always update the initial message with final status
 	var updatedMessage string
+
+	// Count successful and failed backups
+	totalBackups := len(results)
+	successfulBackups := 0
+	failedBackups := 0
+	var totalSize int64
+	var totalDuration time.Duration
+	var strategies []string
+
+	for _, result := range results {
+		strategies = append(strategies, result.Strategy)
+		if result.Success {
+			successfulBackups++
+			totalSize += result.Size
+		} else {
+			failedBackups++
+		}
+		totalDuration += result.Duration
+	}
+
 	if overallSuccess {
-		updatedMessage = fmt.Sprintf("✅ **Database Backup Completed Successfully** - See thread for details\n\nCompleted at: %s",
-			time.Now().Format("2006-01-02 15:04:05 UTC"))
+		if totalBackups == 1 {
+			// Single backup
+			result := results[0]
+			updatedMessage = fmt.Sprintf("✅ **Database Backup Completed Successfully**\n\n"+
+				"**Strategy:** %s\n"+
+				"**Size:** %s\n"+
+				"**Duration:** %v\n"+
+				"**Completed at:** %s\n\n"+
+				"_See thread for detailed logs_",
+				result.Strategy,
+				formatBytes(result.Size),
+				result.Duration.Round(time.Second),
+				time.Now().Format("2006-01-02 15:04:05 UTC"))
+		} else {
+			// Multiple backups
+			updatedMessage = fmt.Sprintf("✅ **Database Backups Completed Successfully**\n\n"+
+				"**Total Backups:** %d/%d successful\n"+
+				"**Strategies:** %s\n"+
+				"**Total Size:** %s\n"+
+				"**Total Duration:** %v\n"+
+				"**Completed at:** %s\n\n"+
+				"_See thread for detailed logs_",
+				successfulBackups, totalBackups,
+				strings.Join(strategies, ", "),
+				formatBytes(totalSize),
+				totalDuration.Round(time.Second),
+				time.Now().Format("2006-01-02 15:04:05 UTC"))
+		}
 	} else {
-		updatedMessage = fmt.Sprintf("❌ **Database Backup Failed** - See thread for details\n\nCompleted at: %s",
-			time.Now().Format("2006-01-02 15:04:05 UTC"))
+		if totalBackups == 1 {
+			// Single backup failed
+			result := results[0]
+			updatedMessage = fmt.Sprintf("❌ **Database Backup Failed**\n\n"+
+				"**Strategy:** %s\n"+
+				"**Error:** %s\n"+
+				"**Duration:** %v\n"+
+				"**Failed at:** %s\n\n"+
+				"_See thread for detailed error information_",
+				result.Strategy,
+				func() string {
+					if result.Error != nil {
+						errorMsg := result.Error.Error()
+						if len(errorMsg) > 100 {
+							return errorMsg[:97] + "..."
+						}
+						return errorMsg
+					}
+					return "Unknown error"
+				}(),
+				result.Duration.Round(time.Second),
+				time.Now().Format("2006-01-02 15:04:05 UTC"))
+		} else {
+			// Multiple backups with failures
+			updatedMessage = fmt.Sprintf("❌ **Database Backups Failed**\n\n"+
+				"**Results:** %d successful, %d failed (%d total)\n"+
+				"**Strategies:** %s\n"+
+				"**Total Duration:** %v\n"+
+				"**Completed at:** %s\n\n"+
+				"_See thread for detailed error information_",
+				successfulBackups, failedBackups, totalBackups,
+				strings.Join(strategies, ", "),
+				totalDuration.Round(time.Second),
+				time.Now().Format("2006-01-02 15:04:05 UTC"))
+		}
 	}
 
 	err = ss.updateMessage(ctx, thread.Channel, thread.Timestamp, updatedMessage)
@@ -163,6 +312,104 @@ func (ss *SlackService) SendBackupResult(ctx context.Context, thread *ThreadInfo
 	}
 
 	return nil
+}
+
+// SendDetailedError sends detailed error information for debugging
+func (ss *SlackService) SendDetailedError(ctx context.Context, thread *ThreadInfo, strategy string, result *backup.BackupResult) error {
+	if ss.client == nil || thread == nil || result == nil {
+		return nil
+	}
+
+	var message strings.Builder
+	message.WriteString(fmt.Sprintf("🔍 **Detailed Error Information for %s**\n\n", strategy))
+
+	if result.Error != nil {
+		message.WriteString(fmt.Sprintf("**Error Message:**\n```%s```\n\n", result.Error.Error()))
+	}
+
+	if !result.StartTime.IsZero() {
+		message.WriteString(fmt.Sprintf("**Start Time:** %s\n", result.StartTime.Format("2006-01-02 15:04:05 UTC")))
+	}
+
+	if !result.EndTime.IsZero() {
+		message.WriteString(fmt.Sprintf("**End Time:** %s\n", result.EndTime.Format("2006-01-02 15:04:05 UTC")))
+	}
+
+	if result.Duration > 0 {
+		message.WriteString(fmt.Sprintf("**Duration:** %v\n", result.Duration.Round(time.Second)))
+	}
+
+	if result.BackupPath != "" {
+		message.WriteString(fmt.Sprintf("**Backup Path:** %s\n", result.BackupPath))
+	}
+
+	if len(result.CommandLogs) > 0 {
+		message.WriteString("\n**Command Execution Logs:**\n")
+		for i, cmdLog := range result.CommandLogs {
+			// Split long logs into multiple messages if needed
+			if len(cmdLog) > 2000 {
+				// For very long logs, truncate and provide a summary
+				message.WriteString(fmt.Sprintf("```Log %d (truncated):\n%s...\n```\n", i+1, cmdLog[:2000]))
+			} else {
+				message.WriteString(fmt.Sprintf("```Log %d:\n%s\n```\n", i+1, cmdLog))
+			}
+		}
+	}
+
+	_, err := ss.sendThreadMessage(ctx, thread.Channel, thread.Timestamp, message.String())
+	return err
+}
+
+// SendDatabaseOutput sends database command output to Slack (only errors and warnings)
+func (ss *SlackService) SendDatabaseOutput(ctx context.Context, thread *ThreadInfo, strategy string, output string) error {
+	if ss.client == nil || thread == nil || strings.TrimSpace(output) == "" {
+		return nil
+	}
+
+	// Clean up the output and check if it contains errors or warnings
+	cleanOutput := strings.TrimSpace(output)
+	outputLower := strings.ToLower(cleanOutput)
+
+	// Only send error/warning messages to Slack
+	if !strings.Contains(outputLower, "error") &&
+		!strings.Contains(outputLower, "failed") &&
+		!strings.Contains(outputLower, "warning") &&
+		!strings.Contains(outputLower, "warn") &&
+		!strings.Contains(outputLower, "fatal") &&
+		!strings.Contains(outputLower, "critical") {
+		// Skip sending non-error messages
+		return nil
+	}
+
+	var icon string
+	var messageType string
+
+	// Determine message type for errors/warnings
+	if strings.Contains(outputLower, "error") || strings.Contains(outputLower, "failed") || strings.Contains(outputLower, "fatal") {
+		icon = "❌"
+		messageType = "Database Error"
+	} else if strings.Contains(outputLower, "warning") || strings.Contains(outputLower, "warn") {
+		icon = "⚠️"
+		messageType = "Database Warning"
+	} else {
+		icon = "�"
+		messageType = "Database Issue"
+	}
+
+	// Truncate very long output
+	if len(cleanOutput) > 1500 {
+		cleanOutput = cleanOutput[:1497] + "..."
+	}
+
+	// Format the message
+	var message strings.Builder
+	message.WriteString(fmt.Sprintf("%s **%s** - %s:\n", icon, strategy, messageType))
+	message.WriteString("```\n")
+	message.WriteString(cleanOutput)
+	message.WriteString("\n```")
+
+	_, err := ss.sendThreadMessage(ctx, thread.Channel, thread.Timestamp, message.String())
+	return err
 }
 
 // TestConnection tests the Slack connection
