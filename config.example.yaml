@@ -1,0 +1,38 @@
+global:
+  slack:
+    bot_token: "${SLACK_BOT_TOKEN}"
+    channel_id: "${SLACK_CHANNEL_ID}" # Slack channel ID (e.g., C1234567890)
+  log_level: "info"
+  schedule: "1d"
+  retention: "30d"
+  timezone: "UTC"
+  temp_dir: "/tmp/db-backup"
+  max_parallel_strategies: 2
+  retry:
+    max_attempts: 3
+  timeout:
+    backup: "30m"
+    upload: "10m"
+  s3:
+    bucket: "${S3_BUCKET}"
+    base_path: "database-backups"
+    compression: "gzip"
+    credentials:
+      access_key: "${AWS_ACCESS_KEY_ID}"
+      secret_key: "${AWS_SECRET_ACCESS_KEY}"
+      region: "${AWS_REGION}"
+  monitoring:
+    metrics:
+      enabled: true
+      port: 8080
+      path: "/metrics"
+    health_check:
+      port: 8080
+      path: "/health"
+
+strategies:
+  - name: "example-db"
+    database_url: "${DATABASE_URL}"
+    schedule: "6h"
+    slack:
+      channel_id: "${SLACK_CRITICAL_CHANNEL_ID}" # Override for critical alerts

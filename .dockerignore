@@ -1,0 +1,12 @@
+config.yaml
+!config.example.yaml
+README.md
+.git
+.github
+*.log
+tmp/
+temp/
+/examples/
+/dist/
+/.vscode/
+/.github/

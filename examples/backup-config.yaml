@@ -1,0 +1,40 @@
+global:
+  slack:
+    bot_token: "${SLACK_BOT_TOKEN}"
+    channel_id: "${SLACK_CHANNEL_ID}" # Use a specific channel ID for demo
+  log_level: "info"
+  schedule: "1m" # Backup every 1 minute
+  retention: "10m" # Keep backups for 10 minutes
+  timezone: "UTC"
+  temp_dir: "/tmp/db-backup"
+  max_parallel_strategies: 1
+  retry:
+    max_attempts: 3
+  timeout:
+    backup: "5m"
+    upload: "2m"
+  s3:
+    bucket: "${S3_BUCKET}"
+    base_path: "demo-backups"
+    compression: "gzip"
+    endpoint: "${S3_ENDPOINT}" # MinIO endpoint
+    credentials:
+      access_key: "${AWS_ACCESS_KEY_ID}"
+      secret_key: "${AWS_SECRET_ACCESS_KEY}"
+      region: "${AWS_REGION}"
+  monitoring:
+    metrics:
+      enabled: true
+      port: 8080
+      path: "/metrics"
+    health_check:
+      port: 8080
+      path: "/health"
+
+strategies:
+  - name: "demo-database"
+    database_url: "${DATABASE_URL}"
+    schedule: "1m" # Override to backup every minute
+    retention: "10m" # Keep only last 10 minutes of backups
+    slack:
+      channel_id: "C06EAHNLB7X" # Specific channel ID for backup demo
