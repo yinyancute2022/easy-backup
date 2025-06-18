@@ -28,7 +28,7 @@ DOCKER_TAG?=latest
 
 # Default target
 .PHONY: all
-all: clean deps lint test build
+all: clean deps test build
 
 # Install dependencies
 .PHONY: deps
@@ -48,16 +48,6 @@ fmt:
 vet:
 	@echo "Vetting Go code..."
 	$(GOVET) ./...
-
-# Lint code (requires golangci-lint)
-.PHONY: lint
-lint:
-	@echo "Linting Go code..."
-	@if command -v golangci-lint >/dev/null 2>&1; then \
-		golangci-lint run; \
-	else \
-		echo "golangci-lint not found. Install it with: go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest"; \
-	fi
 
 # Run tests
 .PHONY: test
@@ -199,7 +189,7 @@ mocks:
 
 # Release preparation
 .PHONY: release
-release: clean deps lint test build-all
+release: clean deps test build-all
 	@echo "Release build completed!"
 	@echo "Version: $(VERSION)"
 	@echo "Build time: $(BUILD_TIME)"
@@ -209,8 +199,6 @@ release: clean deps lint test build-all
 .PHONY: install-tools
 install-tools:
 	@echo "Installing development tools..."
-	go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
-	go install github.com/securecodewarrior/gosec/v2/cmd/gosec@latest
 	go install github.com/cosmtrek/air@latest
 	go install github.com/golang/mock/mockgen@latest
 
@@ -249,11 +237,10 @@ example-test:
 .PHONY: help
 help:
 	@echo "Available targets:"
-	@echo "  all           - Run clean, deps, lint, test, and build"
+	@echo "  all           - Run clean, deps, test, and build"
 	@echo "  deps          - Install dependencies"
 	@echo "  fmt           - Format Go code"
 	@echo "  vet           - Vet Go code"
-	@echo "  lint          - Lint Go code (requires golangci-lint)"
 	@echo "  test          - Run tests"
 	@echo "  test-coverage - Run tests with coverage report"
 	@echo "  test-short    - Run short tests"

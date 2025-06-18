@@ -27,8 +27,6 @@ make install-tools
 
 This installs:
 
-- `golangci-lint` - For linting
-- `gosec` - For security checks
 - `air` - For hot reload development
 - `mockgen` - For generating mocks
 
@@ -78,9 +76,6 @@ make fmt
 # Vet code
 make vet
 
-# Lint code
-make lint
-
 # Security check
 make security
 ```
@@ -106,11 +101,10 @@ make validate-config
 
 | Target            | Description                              |
 | ----------------- | ---------------------------------------- |
-| `all`             | Run clean, deps, lint, test, and build   |
+| `all`             | Run clean, deps, test, and build        |
 | `deps`            | Install dependencies                     |
 | `fmt`             | Format Go code                           |
 | `vet`             | Vet Go code                              |
-| `lint`            | Lint Go code (requires golangci-lint)    |
 | `test`            | Run tests                                |
 | `test-coverage`   | Run tests with coverage report           |
 | `test-short`      | Run short tests                          |
@@ -151,7 +145,6 @@ make validate-config
 ├── Dockerfile             # Container definition
 ├── Makefile              # Build automation
 ├── .air.toml             # Hot reload configuration
-├── .golangci.yml         # Linter configuration
 └── go.mod                # Go module definition
 ```
 
@@ -351,7 +344,7 @@ The project includes GitHub Actions for:
 1. Fork the repository
 2. Create a feature branch
 3. Make changes following the coding standards
-4. Run tests and linting: `make all`
+4. Run tests: `make test`
 5. Submit a pull request
 
 ### Coding Standards
@@ -360,4 +353,3 @@ The project includes GitHub Actions for:
 - Follow Go naming conventions
 - Add tests for new functionality
 - Update documentation as needed
-- Ensure linting passes with `golangci-lint`

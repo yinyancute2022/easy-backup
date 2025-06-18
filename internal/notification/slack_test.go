@@ -62,9 +62,8 @@ func TestNewSlackService(t *testing.T) {
 					},
 				},
 			}
-
 			// Initialize logger before creating service
-			logger.InitLogger("info")
+			_ = logger.InitLogger("info")
 
 			service := NewSlackService(cfg)
 
@@ -133,7 +132,7 @@ func TestIsValidBotToken(t *testing.T) {
 }
 
 func TestSlackService_SendBackupStarted(t *testing.T) {
-	logger.InitLogger("info")
+	_ = logger.InitLogger("info")
 
 	t.Run("no_client", func(t *testing.T) {
 		cfg := &config.Config{
@@ -183,7 +182,7 @@ func TestSlackService_SendBackupStarted(t *testing.T) {
 }
 
 func TestSlackService_SendBackupProgress(t *testing.T) {
-	logger.InitLogger("info")
+	_ = logger.InitLogger("info")
 
 	t.Run("no_client", func(t *testing.T) {
 		cfg := &config.Config{
@@ -224,7 +223,7 @@ func TestSlackService_SendBackupProgress(t *testing.T) {
 }
 
 func TestSlackService_SendBackupResult(t *testing.T) {
-	logger.InitLogger("info")
+	_ = logger.InitLogger("info")
 
 	t.Run("no_client", func(t *testing.T) {
 		cfg := &config.Config{
@@ -279,14 +278,14 @@ func TestSlackService_SendBackupResult(t *testing.T) {
 }
 
 func TestSlackService_SendBackupResult_MessageUpdates(t *testing.T) {
-	logger.InitLogger("info")
+	_ = logger.InitLogger("info")
 
 	// Mock slack client for testing message updates
 	tests := []struct {
-		name            string
-		overallSuccess  bool
-		expectSuccess   bool
-		expectFailure   bool
+		name           string
+		overallSuccess bool
+		expectSuccess  bool
+		expectFailure  bool
 	}{
 		{
 			name:           "success_should_update_message",
@@ -355,7 +354,7 @@ func TestSlackService_SendBackupResult_MessageUpdates(t *testing.T) {
 }
 
 func TestSlackService_SendBackupStarted_MessageFormat(t *testing.T) {
-	logger.InitLogger("info")
+	_ = logger.InitLogger("info")
 
 	cfg := &config.Config{
 		Global: config.GlobalConfig{

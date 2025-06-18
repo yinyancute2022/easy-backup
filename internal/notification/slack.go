@@ -56,7 +56,7 @@ func isValidBotToken(token string) bool {
 	if strings.HasPrefix(token, "fake-test-token-") {
 		return true
 	}
-	
+
 	// Check if it starts with xoxb- and has a reasonable length
 	// Real Slack bot tokens are typically much longer than the placeholder
 	if !strings.HasPrefix(token, "xoxb-") {
@@ -156,7 +156,7 @@ func (ss *SlackService) SendBackupResult(ctx context.Context, thread *ThreadInfo
 		updatedMessage = fmt.Sprintf("❌ **Database Backup Failed** - See thread for details\n\nCompleted at: %s",
 			time.Now().Format("2006-01-02 15:04:05 UTC"))
 	}
-	
+
 	err = ss.updateMessage(ctx, thread.Channel, thread.Timestamp, updatedMessage)
 	if err != nil {
 		ss.logger.WithError(err).Warn("Failed to update original message with final status")
