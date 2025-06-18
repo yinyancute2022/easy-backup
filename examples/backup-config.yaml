@@ -3,7 +3,7 @@ global:
     bot_token: "${SLACK_BOT_TOKEN}"
     channel_id: "${SLACK_CHANNEL_ID}" # Use a specific channel ID for demo
   log_level: "info"
-  schedule: "1m" # Backup every 1 minute
+  schedule: "*/1 * * * *" # Backup every 1 minute (for demo purposes)
   retention: "10m" # Keep backups for 10 minutes
   timezone: "UTC"
   temp_dir: "/tmp/db-backup"
@@ -35,7 +35,7 @@ strategies:
   - name: "postgres-database"
     database_type: "postgres"
     database_url: "${POSTGRES_DATABASE_URL}"
-    schedule: "1m" # Override to backup every minute
+    schedule: "*/1 * * * *" # Override to backup every minute (for demo)
     retention: "10m" # Keep only last 10 minutes of backups
     # slack:
     #   channel_id: "C06EAHNLB7X" # Specific channel ID for backup demo
@@ -43,11 +43,11 @@ strategies:
   - name: "mysql-database"
     database_type: "mysql"
     database_url: "${MYSQL_DATABASE_URL}"
-    schedule: "1m"
+    schedule: "*/1 * * * *" # Every minute (for demo)
     retention: "15m"
 
   - name: "mongodb-database"
     database_type: "mongodb"
     database_url: "${MONGODB_DATABASE_URL}"
-    schedule: "1m"
+    schedule: "*/1 * * * *" # Every minute (for demo)
     retention: "20m"

@@ -285,44 +285,36 @@ func (ss *SchedulerService) handleBackupFailure(strategy config.StrategyConfig, 
 	}
 }
 
-// convertToCronExpression converts simple duration format to cron expression
+// convertToCronExpression validates cron expression
 func (ss *SchedulerService) convertToCronExpression(schedule string) (string, error) {
-	duration, err := config.ParseDuration(schedule)
-	if err != nil {
-		return "", err
+	// Check if it's a valid cron expression
+	if ss.isValidCronExpression(schedule) {
+		return schedule, nil
 	}
 
-	switch {
-	case duration < time.Hour:
-		// For sub-hourly schedules, use minute intervals
-		minutes := int(duration.Minutes())
-		return fmt.Sprintf("*/%d * * * *", minutes), nil
-	case duration == time.Hour:
-		// Every hour
-		return "0 * * * *", nil
-	case duration == 24*time.Hour:
-		// Daily at midnight
-		return "0 0 * * *", nil
-	case duration == 7*24*time.Hour:
-		// Weekly on Sunday at midnight
-		return "0 0 * * 0", nil
-	default:
-		// For other durations, convert to hours and use hourly intervals
-		hours := int(duration.Hours())
-		return fmt.Sprintf("0 */%d * * *", hours), nil
-	}
+	return "", fmt.Errorf("invalid cron expression: %s. Expected format: 'minute hour day month dayOfWeek' (e.g., '0 2 * * *' for daily at 2 AM)", schedule)
+}
+
+// isValidCronExpression checks if a string is a valid cron expression
+func (ss *SchedulerService) isValidCronExpression(expr string) bool {
+	// Try to parse as cron expression
+	parser := cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow)
+	_, err := parser.Parse(expr)
+	return err == nil
 }
 
 // getNextRunTime calculates the next run time for a schedule
 func (ss *SchedulerService) getNextRunTime(schedule string) string {
 	cronExpr, err := ss.convertToCronExpression(schedule)
 	if err != nil {
+		ss.logger.WithError(err).WithField("schedule", schedule).Warn("Failed to convert schedule to cron expression")
 		return ""
 	}
 
 	parser := cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow)
 	sched, err := parser.Parse(cronExpr)
 	if err != nil {
+		ss.logger.WithError(err).WithField("cron_expr", cronExpr).Warn("Failed to parse cron expression")
 		return ""
 	}
 

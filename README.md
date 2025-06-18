@@ -35,7 +35,7 @@ Project name easy backup
 #### Database Support
 
 - **PostgreSQL** backup using `pg_dump` and `pg_restore`
-- **MySQL/MariaDB** backup using `mysqldump`
+- **MySQL/MariaDB** backup using `mariadb-dump`
 - **MongoDB** backup using `mongodump` with tar.gz compression
 - Support multiple database URLs
 - Support database connections through SSH tunnels or proxies
@@ -43,7 +43,8 @@ Project name easy backup
 
 #### Backup Management
 
-- Simple schedule configuration: `1h`, `1d`, `1w` for period and retention
+- **Flexible schedule configuration**:
+  - **Cron expressions**: `"0 2 * * *"` (daily at 2 AM), `"*/15 * * * *"` (every 15 minutes)
 - Upload backups to S3 storage with gzip compression by default
 - Time zone handling for schedules
 
@@ -70,7 +71,7 @@ Project name easy backup
 
 #### Deployment
 
-- Install PostgreSQL client in Docker image
+- Install database clients (PostgreSQL, MariaDB, MongoDB) in Docker image
 - Keep the project simple and maintainable
 
 ### Configuration Example
@@ -81,7 +82,7 @@ global:
     bot_token: "xoxb-your-slack-bot-token"
     channel_id: "C0123456789" # Slack channel ID
   log_level: "info"
-  schedule: "1d"
+  schedule: "0 2 * * *" # Daily at 2 AM
   retention: "30d"
   timezone: "UTC"
   temp_dir: "/tmp/db-backup"
@@ -112,7 +113,7 @@ strategies:
   - name: "production-postgres"
     database_type: "postgres" # Required: postgres, mysql, mariadb, or mongodb
     database_url: "postgres://user:pass@prod-db:5432/myapp"
-    schedule: "6h" # Override global schedule
+    schedule: "0 */6 * * *" # Override global schedule - every 6 hours
     slack:
       channel_id: "C9876543210" # Override global channel ID
 
@@ -124,9 +125,40 @@ strategies:
   - name: "mongodb-logs"
     database_type: "mongodb"
     database_url: "mongodb://user:pass@mongodb:27017/logs"
-    schedule: "12h"
+    schedule: "0 */12 * * *" # Every 12 hours
     retention: "7d"
 ```
+
+### Schedule Configuration
+
+The tool uses cron expression format for scheduling backups:
+
+#### Cron Expression Format
+
+```yaml
+schedule: "0 2 * * *"      # Daily at 2 AM
+schedule: "*/15 * * * *"   # Every 15 minutes
+schedule: "0 */6 * * *"    # Every 6 hours
+schedule: "0 3,9,15,21 * * *"  # Every 6 hours starting at 3 AM
+schedule: "0 0 * * 1"      # Weekly on Monday at midnight
+schedule: "0 8-17 * * 1-5" # Every hour from 8 AM to 5 PM, Monday to Friday
+```
+
+**Cron format:** `minute hour day_of_month month day_of_week`
+
+- **minute**: 0-59
+- **hour**: 0-23 (24-hour format)
+- **day_of_month**: 1-31
+- **month**: 1-12
+- **day_of_week**: 0-6 (Sunday=0)
+
+**Common Examples:**
+
+- `"*/5 * * * *"` - Every 5 minutes
+- `"0 */2 * * *"` - Every 2 hours
+- `"0 0 * * *"` - Daily at midnight
+- `"0 0 * * 0"` - Weekly on Sunday at midnight
+- `"0 6 1 * *"` - Monthly on the 1st at 6 AM
 
 ### Health Check Response
 
@@ -135,25 +167,25 @@ The health check endpoint returns JSON status:
 ```json
 {
   "status": "healthy",
-  "timestamp": "2025-06-17T10:30:00Z",
+  "timestamp": "2025-06-18T10:30:00Z",
   "version": "1.0.0",
   "strategies": {
     "total": 3,
     "last_backup_status": {
       "production-postgres": {
         "status": "success",
-        "last_run": "2025-06-17T06:00:00Z",
-        "next_run": "2025-06-17T12:00:00Z"
+        "last_run": "2025-06-18T06:00:00Z",
+        "next_run": "2025-06-18T12:00:00Z"
       },
       "mysql-app": {
         "status": "success",
-        "last_run": "2025-06-17T00:00:00Z",
-        "next_run": "2025-06-18T00:00:00Z"
+        "last_run": "2025-06-18T00:00:00Z",
+        "next_run": "2025-06-19T00:00:00Z"
       },
       "mongodb-logs": {
         "status": "failed",
-        "last_run": "2025-06-17T00:00:00Z",
-        "next_run": "2025-06-17T12:00:00Z",
+        "last_run": "2025-06-18T00:00:00Z",
+        "next_run": "2025-06-18T12:00:00Z",
         "error": "connection timeout"
       }
     }
