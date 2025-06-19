@@ -321,3 +321,234 @@ func (ss *SchedulerService) getNextRunTime(schedule string) string {
 	nextTime := sched.Next(time.Now())
 	return nextTime.UTC().Format(time.RFC3339)
 }
+
+// ExecuteAllStrategiesManually executes all backup strategies manually
+func (ss *SchedulerService) ExecuteAllStrategiesManually() {
+	ss.logger.Info("Starting manual execution of all backup strategies")
+
+	if len(ss.config.Strategies) == 0 {
+		ss.logger.Warn("No backup strategies configured")
+		return
+	}
+
+	// Send initial Slack notification for all strategies
+	strategyNames := make([]string, len(ss.config.Strategies))
+	for i, strategy := range ss.config.Strategies {
+		strategyNames[i] = strategy.Name
+	}
+
+	// Use the first strategy's Slack config or global config
+	var slackConfig config.SlackConfig
+	if len(ss.config.Strategies) > 0 {
+		slackConfig = ss.config.Strategies[0].Slack
+		if slackConfig.BotToken == "" {
+			slackConfig = ss.config.Global.Slack
+		}
+	} else {
+		slackConfig = ss.config.Global.Slack
+	}
+
+	thread, err := ss.slackService.SendBackupStarted(ss.ctx, strategyNames, slackConfig)
+	if err != nil {
+		ss.logger.WithError(err).Warn("Failed to send manual backup started notification")
+	}
+
+	// Execute each strategy
+	successCount := 0
+	failureCount := 0
+	results := make(map[string]*backup.BackupResult)
+
+	for _, strategy := range ss.config.Strategies {
+		ss.logger.WithField("strategy", strategy.Name).Info("Starting manual backup execution")
+
+		// Update strategy status
+		ss.monitoringService.UpdateStrategyStatus(strategy.Name, monitoring.StrategyStatus{
+			Status:  "running",
+			LastRun: time.Now().UTC().Format(time.RFC3339),
+		})
+
+		// Send progress update
+		if thread != nil {
+			progressMsg := fmt.Sprintf("Starting backup for strategy: %s", strategy.Name)
+			if err := ss.slackService.SendBackupProgress(ss.ctx, thread, strategy.Name, progressMsg); err != nil {
+				ss.logger.WithError(err).Warn("Failed to send backup progress notification")
+			}
+		}
+
+		// Execute backup with retry
+		var result *backup.BackupResult
+		var lastErr error
+
+		for attempt := 1; attempt <= ss.config.Global.Retry.MaxAttempts; attempt++ {
+			if attempt > 1 {
+				ss.logger.WithFields(logrus.Fields{
+					"strategy": strategy.Name,
+					"attempt":  attempt,
+				}).Info("Retrying manual backup")
+				if thread != nil {
+					retryMsg := fmt.Sprintf("Retrying backup for %s (attempt %d/%d)", strategy.Name, attempt, ss.config.Global.Retry.MaxAttempts)
+					if err := ss.slackService.SendBackupProgress(ss.ctx, thread, strategy.Name, retryMsg); err != nil {
+						ss.logger.WithError(err).Warn("Failed to send backup progress notification")
+					}
+				}
+			}
+
+			result, lastErr = ss.backupService.ExecuteBackupWithProgress(ss.ctx, strategy, func(strategyName, message string) {
+				// Send database output to Slack
+				if thread != nil {
+					if err := ss.slackService.SendDatabaseOutput(ss.ctx, thread, strategyName, message); err != nil {
+						ss.logger.WithError(err).Warn("Failed to send database output to Slack")
+					}
+				}
+			})
+			if lastErr == nil {
+				break
+			}
+
+			ss.logger.WithError(lastErr).WithFields(logrus.Fields{
+				"strategy": strategy.Name,
+				"attempt":  attempt,
+			}).Warn("Manual backup attempt failed")
+
+			// Send progress update about the failed attempt
+			if thread != nil && attempt < ss.config.Global.Retry.MaxAttempts {
+				failureMsg := fmt.Sprintf("Attempt %d/%d failed for %s: %s", attempt, ss.config.Global.Retry.MaxAttempts, strategy.Name, lastErr.Error())
+				if err := ss.slackService.SendBackupProgress(ss.ctx, thread, strategy.Name, failureMsg); err != nil {
+					ss.logger.WithError(err).Warn("Failed to send backup progress notification")
+				}
+			}
+		}
+
+		if lastErr != nil {
+			// All attempts failed
+			failureCount++
+			results[strategy.Name] = result
+			ss.logger.WithError(lastErr).WithField("strategy", strategy.Name).Error("Manual backup failed after all attempts")
+
+			// Update strategy status
+			ss.monitoringService.UpdateStrategyStatus(strategy.Name, monitoring.StrategyStatus{
+				Status:  "failed",
+				LastRun: time.Now().UTC().Format(time.RFC3339),
+				NextRun: ss.getNextRunTime(strategy.Schedule),
+				Error:   lastErr.Error(),
+			})
+
+			// Send failure notification
+			if thread != nil {
+				if err := ss.slackService.SendDetailedError(ss.ctx, thread, strategy.Name, result); err != nil {
+					ss.logger.WithError(err).Warn("Failed to send backup failed notification")
+				}
+			}
+			continue
+		}
+
+		// Backup successful, upload to S3
+		if thread != nil {
+			uploadMsg := fmt.Sprintf("Uploading %s backup to S3...", strategy.Name)
+			if err := ss.slackService.SendBackupProgress(ss.ctx, thread, strategy.Name, uploadMsg); err != nil {
+				ss.logger.WithError(err).Warn("Failed to send backup progress notification")
+			}
+		}
+
+		s3Location, err := ss.s3Service.UploadBackup(ss.ctx, strategy.Name, result.BackupPath)
+		if err != nil {
+			ss.logger.WithError(err).WithField("strategy", strategy.Name).Error("Failed to upload manual backup to S3")
+			failureCount++
+			results[strategy.Name] = result
+
+			// Update strategy status
+			ss.monitoringService.UpdateStrategyStatus(strategy.Name, monitoring.StrategyStatus{
+				Status:  "failed",
+				LastRun: time.Now().UTC().Format(time.RFC3339),
+				NextRun: ss.getNextRunTime(strategy.Schedule),
+				Error:   err.Error(),
+			})
+
+			// Send failure notification
+			if thread != nil {
+				if err := ss.slackService.SendDetailedError(ss.ctx, thread, strategy.Name, result); err != nil {
+					ss.logger.WithError(err).Warn("Failed to send backup failed notification")
+				}
+			}
+			continue
+		}
+
+		// Clean up local file
+		if err := ss.backupService.CleanupTempFiles(result.BackupPath); err != nil {
+			ss.logger.WithError(err).Warn("Failed to cleanup temporary files")
+		}
+
+		// Success
+		successCount++
+		results[strategy.Name] = result
+		ss.logger.WithFields(logrus.Fields{
+			"strategy":    strategy.Name,
+			"size":        result.Size,
+			"duration":    result.Duration,
+			"s3_location": s3Location,
+		}).Info("Manual backup completed successfully")
+
+		// Update strategy status
+		ss.monitoringService.UpdateStrategyStatus(strategy.Name, monitoring.StrategyStatus{
+			Status:  "success",
+			LastRun: time.Now().UTC().Format(time.RFC3339),
+			NextRun: ss.getNextRunTime(strategy.Schedule),
+		})
+	}
+
+	// Send final summary notification
+	if thread != nil {
+		var summaryResults []*backup.BackupResult
+		for _, result := range results {
+			if result != nil {
+				summaryResults = append(summaryResults, result)
+			}
+		}
+
+		if failureCount == 0 {
+			// All successful
+			if err := ss.slackService.SendBackupResult(ss.ctx, thread, summaryResults, true); err != nil {
+				ss.logger.WithError(err).Warn("Failed to send backup success notification")
+			}
+		} else if successCount == 0 {
+			// All failed
+			if err := ss.slackService.SendBackupResult(ss.ctx, thread, summaryResults, false); err != nil {
+				ss.logger.WithError(err).Warn("Failed to send backup failed notification")
+			}
+		} else {
+			// Mixed results
+			mixedMsg := fmt.Sprintf("Manual backup completed: %d successful, %d failed", successCount, failureCount)
+			if err := ss.slackService.SendBackupProgress(ss.ctx, thread, "Summary", mixedMsg); err != nil {
+				ss.logger.WithError(err).Warn("Failed to send backup summary notification")
+			}
+		}
+	}
+
+	ss.logger.WithFields(logrus.Fields{
+		"total":      len(ss.config.Strategies),
+		"successful": successCount,
+		"failed":     failureCount,
+	}).Info("Manual execution of all backup strategies completed")
+}
+
+// ExecuteStrategyManually executes a specific backup strategy manually
+func (ss *SchedulerService) ExecuteStrategyManually(strategyName string) error {
+	ss.logger.WithField("strategy", strategyName).Info("Starting manual execution of backup strategy")
+
+	// Find the strategy
+	var targetStrategy *config.StrategyConfig
+	for _, strategy := range ss.config.Strategies {
+		if strategy.Name == strategyName {
+			targetStrategy = &strategy
+			break
+		}
+	}
+
+	if targetStrategy == nil {
+		return fmt.Errorf("strategy '%s' not found", strategyName)
+	}
+
+	// Execute the backup job
+	ss.executeBackupJob(*targetStrategy)
+	return nil
+}

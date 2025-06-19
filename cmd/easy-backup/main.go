@@ -25,6 +25,8 @@ const (
 func main() {
 	// Parse command line flags
 	configPath := flag.String("config", defaultConfigPath, "Path to configuration file")
+	manualTrigger := flag.Bool("manual", false, "Execute all backup strategies manually and exit")
+	manualStrategy := flag.String("strategy", "", "Execute a specific backup strategy manually and exit")
 	flag.Parse()
 
 	// Load configuration
@@ -60,6 +62,23 @@ func main() {
 		slackService,
 		monitoringService,
 	)
+
+	// Handle manual trigger modes
+	if *manualTrigger {
+		log.Info("Manual trigger mode: executing all backup strategies")
+		schedulerService.ExecuteAllStrategiesManually()
+		log.Info("Manual execution completed, exiting")
+		return
+	}
+
+	if *manualStrategy != "" {
+		log.WithField("strategy", *manualStrategy).Info("Manual trigger mode: executing specific backup strategy")
+		if err := schedulerService.ExecuteStrategyManually(*manualStrategy); err != nil {
+			log.Fatalf("Failed to execute strategy manually: %v", err)
+		}
+		log.Info("Manual execution completed, exiting")
+		return
+	}
 
 	// Create context for graceful shutdown
 	_, cancel := context.WithCancel(context.Background())
