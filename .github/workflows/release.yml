@@ -1,0 +1,154 @@
+name: Release
+
+on:
+  release:
+    types: [created]
+
+jobs:
+  build-and-upload:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    strategy:
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+            suffix: linux-amd64
+          - goos: linux
+            goarch: arm64
+            suffix: linux-arm64
+          - goos: darwin
+            goarch: amd64
+            suffix: darwin-amd64
+          - goos: darwin
+            goarch: arm64
+            suffix: darwin-arm64
+          - goos: windows
+            goarch: amd64
+            suffix: windows-amd64.exe
+          - goos: windows
+            goarch: arm64
+            suffix: windows-arm64.exe
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: "1.21"
+
+      - name: Get version from tag
+        id: version
+        run: echo "version=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+      - name: Build easy-backup
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: 0
+        run: |
+          mkdir -p dist
+          BINARY_NAME="easy-backup-${{ steps.version.outputs.version }}-${{ matrix.suffix }}"
+          if [[ "${{ matrix.goos }}" == "windows" ]]; then
+            BINARY_NAME="${BINARY_NAME}"
+          fi
+
+          go build \
+            -ldflags "-X main.Version=${{ steps.version.outputs.version }} -X main.BuildTime=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            -a -installsuffix cgo \
+            -o "dist/${BINARY_NAME}" \
+            ./cmd/easy-backup
+
+      - name: Build config-validator
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: 0
+        run: |
+          BINARY_NAME="config-validator-${{ steps.version.outputs.version }}-${{ matrix.suffix }}"
+          if [[ "${{ matrix.goos }}" == "windows" ]]; then
+            BINARY_NAME="${BINARY_NAME}"
+          fi
+
+          go build \
+            -ldflags "-X main.Version=${{ steps.version.outputs.version }} -X main.BuildTime=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            -a -installsuffix cgo \
+            -o "dist/${BINARY_NAME}" \
+            ./cmd/config-validator
+
+      - name: Create archive
+        run: |
+          cd dist
+          if [[ "${{ matrix.goos }}" == "windows" ]]; then
+            # Create ZIP for Windows
+            zip -r "db-backup-${{ steps.version.outputs.version }}-${{ matrix.suffix }}.zip" \
+              easy-backup-${{ steps.version.outputs.version }}-${{ matrix.suffix }} \
+              config-validator-${{ steps.version.outputs.version }}-${{ matrix.suffix }}
+          else
+            # Create tar.gz for Unix-like systems
+            tar -czf "db-backup-${{ steps.version.outputs.version }}-${{ matrix.suffix }}.tar.gz" \
+              easy-backup-${{ steps.version.outputs.version }}-${{ matrix.suffix }} \
+              config-validator-${{ steps.version.outputs.version }}-${{ matrix.suffix }}
+          fi
+
+      - name: Upload release assets
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [[ "${{ matrix.goos }}" == "windows" ]]; then
+            ARCHIVE_NAME="db-backup-${{ steps.version.outputs.version }}-${{ matrix.suffix }}.zip"
+          else
+            ARCHIVE_NAME="db-backup-${{ steps.version.outputs.version }}-${{ matrix.suffix }}.tar.gz"
+          fi
+
+          gh release upload ${{ steps.version.outputs.version }} \
+            "dist/${ARCHIVE_NAME}" \
+            --clobber
+
+  build-docker-release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: "1.21"
+
+      - name: Get version from tag
+        id: version
+        run: echo "version=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
