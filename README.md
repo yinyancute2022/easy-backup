@@ -2,6 +2,88 @@
 
 Project name easy backup
 
+## Installation
+
+### Download Pre-built Binaries
+
+Download the latest release from the [GitHub Releases page](https://github.com/yinyancute2022/db-backup/releases).
+
+Available for:
+
+- Linux (amd64, arm64)
+- macOS (amd64, arm64)
+- Windows (amd64, arm64)
+
+```bash
+# Example: Download and extract for Linux amd64
+wget https://github.com/yinyancute2022/db-backup/releases/latest/download/db-backup-v1.0.0-linux-amd64.tar.gz
+tar -xzf db-backup-v1.0.0-linux-amd64.tar.gz
+
+# Make binaries executable
+chmod +x easy-backup-v1.0.0-linux-amd64
+chmod +x config-validator-v1.0.0-linux-amd64
+
+# Optionally, move to PATH
+sudo mv easy-backup-v1.0.0-linux-amd64 /usr/local/bin/easy-backup
+sudo mv config-validator-v1.0.0-linux-amd64 /usr/local/bin/config-validator
+```
+
+### Docker Image
+
+```bash
+# Pull the latest Docker image
+docker pull ghcr.io/yinyancute2022/db-backup:latest
+
+# Or use a specific version
+docker pull ghcr.io/yinyancute2022/db-backup:v1.0.0
+```
+
+### Build from Source
+
+```bash
+# Clone the repository
+git clone https://github.com/yinyancute2022/db-backup.git
+cd db-backup
+
+# Build the binaries
+make build
+
+# Or build manually
+go build -o easy-backup ./cmd/easy-backup
+go build -o config-validator ./cmd/config-validator
+```
+
+## Quick Start
+
+### 1. Validate Configuration
+
+```bash
+# Validate your configuration file
+./config-validator path/to/your/config.yaml
+```
+
+### 2. Run Backup Service
+
+```bash
+# Run with configuration file
+./easy-backup -config path/to/your/config.yaml
+
+# Run with Docker
+docker run -v $(pwd)/config.yaml:/app/config.yaml \
+  -v $(pwd)/.env:/app/.env \
+  ghcr.io/yinyancute2022/db-backup:latest
+```
+
+### 3. Monitor Health
+
+```bash
+# Check health status
+curl http://localhost:8080/health
+
+# View metrics
+curl http://localhost:8080/metrics
+```
+
 ## Project Requirements
 
 ### Technology Stack
