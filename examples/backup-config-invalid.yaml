@@ -1,0 +1,42 @@
+global:
+  slack:
+    bot_token: "${SLACK_BOT_TOKEN}"
+    channel_id: "${SLACK_CHANNEL_ID}"
+  log_level: "info"
+  schedule: "*/1 * * * *"
+  retention: "10m"
+  timezone: "UTC"
+  temp_dir: "/tmp/db-backup"
+  max_parallel_strategies: 1
+  execute_on_startup: true
+  retry:
+    max_attempts: 1 # Reduce retries for faster testing
+  timeout:
+    backup: "5m"
+    upload: "2m"
+  s3:
+    bucket: "${S3_BUCKET}"
+    base_path: "demo-backups"
+    compression: "gzip"
+    endpoint: "${S3_ENDPOINT}"
+    credentials:
+      access_key: "${AWS_ACCESS_KEY_ID}"
+      secret_key: "${AWS_SECRET_ACCESS_KEY}"
+      region: "${AWS_REGION}"
+  monitoring:
+    metrics:
+      enabled: true
+      port: 8080
+      path: "/metrics"
+    health_check:
+      port: 8080
+      path: "/health"
+
+strategies:
+  - name: "mysql-database-invalid"
+    database_type: "mysql"
+    database_url: "mysql://wrong_user:wrong_password@mysql:3306/testdb"
+    schedule: "*/5 * * * *"
+    retention: "15m"
+    slack:
+      channel_id: "${SLACK_CHANNEL_ID}"

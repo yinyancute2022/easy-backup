@@ -1,13 +1,11 @@
 package backup
 
 import (
-	"bufio"
 	"compress/gzip"
 	"context"
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -34,199 +32,164 @@ type BackupResult struct {
 	CommandLogs []string
 }
 
-// BackupService handles database backup operations
-type BackupService struct {
-	config *config.Config
-	logger *logrus.Logger
+// DatabaseStrategy interface defines the contract for database backup strategies
+type DatabaseStrategy interface {
+	Backup(ctx context.Context, databaseURL, outputPath string, callback ProgressCallback) (*BackupResult, error)
+	ValidateConnection(databaseURL string) error
+	GetType() string
 }
 
-// NewBackupService creates a new backup service
+// BackupService handles database backup operations using the Strategy pattern
+type BackupService struct {
+	config     *config.Config
+	logger     *logrus.Logger
+	strategies map[string]DatabaseStrategy
+}
+
+// NewBackupService creates a new backup service with all database strategies
 func NewBackupService(cfg *config.Config) *BackupService {
-	return &BackupService{
-		config: cfg,
-		logger: logger.GetLogger(),
+	service := &BackupService{
+		config:     cfg,
+		logger:     logger.GetLogger(),
+		strategies: make(map[string]DatabaseStrategy),
 	}
+
+	// Register all database strategies
+	service.registerStrategies()
+	return service
+}
+
+// registerStrategies registers all available database backup strategies
+func (bs *BackupService) registerStrategies() {
+	bs.strategies["postgres"] = NewPostgresStrategy(bs.logger)
+	bs.strategies["mysql"] = NewMySQLStrategy(bs.logger)
+	bs.strategies["mariadb"] = NewMySQLStrategy(bs.logger) // MySQL strategy handles MariaDB too
+	bs.strategies["mongodb"] = NewMongoStrategy(bs.logger)
 }
 
 // ExecuteBackup performs a backup for a specific strategy
 func (bs *BackupService) ExecuteBackup(ctx context.Context, strategy config.StrategyConfig) (*BackupResult, error) {
-	startTime := time.Now()
-	result := &BackupResult{
-		Strategy:    strategy.Name,
-		StartTime:   startTime,
-		CommandLogs: make([]string, 0),
-	}
-
-	bs.logger.WithField("strategy", strategy.Name).Info("Starting backup")
-
-	// Create temp directory if it doesn't exist
-	if err := os.MkdirAll(bs.config.Global.TempDir, 0755); err != nil {
-		result.Error = fmt.Errorf("failed to create temp directory: %w", err)
-		result.Success = false
-		return result, result.Error
-	}
-
-	// Generate backup filename with simplified format
-	backupPath := bs.generateBackupPath(strategy, startTime)
-
-	// Parse timeout
-	timeout, err := config.ParseDuration(bs.config.Global.Timeout.Backup)
-	if err != nil {
-		result.Error = fmt.Errorf("invalid backup timeout: %w", err)
-		result.Success = false
-		return result, result.Error
-	}
-
-	// Create context with timeout
-	timeoutCtx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-
-	// Execute database-specific backup command
-	if err := bs.executeBackup(timeoutCtx, strategy, backupPath, result); err != nil {
-		result.Error = err
-		result.Success = false
-		return result, result.Error
-	}
-
-	// Compress if enabled (skip for MongoDB as it's already compressed)
-	if bs.config.Global.S3.Compression == "gzip" && strategy.DatabaseType != "mongodb" {
-		compressedPath := backupPath + ".gz"
-		if err := bs.compressFile(backupPath, compressedPath); err != nil {
-			result.Error = fmt.Errorf("failed to compress backup: %w", err)
-			result.Success = false
-			return result, result.Error
-		}
-		// Remove original uncompressed file
-		os.Remove(backupPath)
-		backupPath = compressedPath
-	}
-
-	// For MongoDB, the backup path might have been changed to .tar.gz
-	if strategy.DatabaseType == "mongodb" && !strings.HasSuffix(backupPath, ".tar.gz") {
-		backupPath = backupPath + ".tar.gz"
-	}
-
-	// Get file size
-	fileInfo, err := os.Stat(backupPath)
-	if err != nil {
-		result.Error = fmt.Errorf("failed to get backup file info: %w", err)
-		result.Success = false
-		return result, result.Error
-	}
-
-	result.BackupPath = backupPath
-	result.Size = fileInfo.Size()
-	result.EndTime = time.Now()
-	result.Duration = result.EndTime.Sub(result.StartTime)
-	result.Success = true
-
-	bs.logger.WithFields(logrus.Fields{
-		"strategy": strategy.Name,
-		"size":     result.Size,
-		"duration": result.Duration,
-		"path":     backupPath,
-	}).Info("Backup completed successfully")
-
-	return result, nil
+	return bs.executeBackup(ctx, strategy, nil)
 }
 
-// ExecuteBackupWithProgress performs a backup for a specific strategy with progress callbacks
+// ExecuteBackupWithProgress performs a backup with progress callbacks
 func (bs *BackupService) ExecuteBackupWithProgress(ctx context.Context, strategy config.StrategyConfig, progressCallback ProgressCallback) (*BackupResult, error) {
+	return bs.executeBackup(ctx, strategy, progressCallback)
+}
+
+// executeBackup is the main backup execution logic
+func (bs *BackupService) executeBackup(ctx context.Context, strategyConfig config.StrategyConfig, progressCallback ProgressCallback) (*BackupResult, error) {
 	startTime := time.Now()
 	result := &BackupResult{
-		Strategy:    strategy.Name,
+		Strategy:    strategyConfig.Name,
 		StartTime:   startTime,
 		CommandLogs: make([]string, 0),
 	}
-
-	bs.logger.WithField("strategy", strategy.Name).Info("Starting backup")
 
 	// Send initial progress
 	if progressCallback != nil {
-		progressCallback(strategy.Name, "Starting database backup...")
+		progressCallback(strategyConfig.Name, "Starting database backup...")
+	}
+
+	// Get the appropriate database strategy
+	dbStrategy, exists := bs.strategies[strategyConfig.DatabaseType]
+	if !exists {
+		err := fmt.Errorf("unsupported database type: %s", strategyConfig.DatabaseType)
+		result.Error = err
+		result.Success = false
+		if progressCallback != nil {
+			progressCallback(strategyConfig.Name, fmt.Sprintf("❌ Unsupported database type: %s", strategyConfig.DatabaseType))
+		}
+		return result, err
+	}
+
+	// Validate connection URL
+	if err := dbStrategy.ValidateConnection(strategyConfig.DatabaseURL); err != nil {
+		result.Error = err
+		result.Success = false
+		if progressCallback != nil {
+			progressCallback(strategyConfig.Name, fmt.Sprintf("❌ Invalid connection URL: %s", err.Error()))
+		}
+		return result, err
 	}
 
 	// Create temp directory if it doesn't exist
 	if err := os.MkdirAll(bs.config.Global.TempDir, 0755); err != nil {
-		result.Error = fmt.Errorf("failed to create temp directory: %w", err)
+		err = fmt.Errorf("failed to create temp directory: %w", err)
+		result.Error = err
 		result.Success = false
-		return result, result.Error
+		if progressCallback != nil {
+			progressCallback(strategyConfig.Name, fmt.Sprintf("❌ Failed to create temp directory: %s", err.Error()))
+		}
+		return result, err
 	}
 
-	// Generate backup filename with simplified format
-	backupPath := bs.generateBackupPath(strategy, startTime)
+	// Generate backup filename
+	backupPath := bs.generateBackupPath(strategyConfig, startTime)
 
 	// Parse timeout
 	timeout, err := config.ParseDuration(bs.config.Global.Timeout.Backup)
 	if err != nil {
-		result.Error = fmt.Errorf("invalid backup timeout: %w", err)
+		err = fmt.Errorf("invalid backup timeout: %w", err)
+		result.Error = err
 		result.Success = false
-		return result, result.Error
+		if progressCallback != nil {
+			progressCallback(strategyConfig.Name, fmt.Sprintf("❌ Invalid backup timeout: %s", err.Error()))
+		}
+		return result, err
 	}
 
 	// Create context with timeout
 	timeoutCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	// Send progress update
+	// Execute backup using the strategy
 	if progressCallback != nil {
-		progressCallback(strategy.Name, fmt.Sprintf("Executing %s backup command...", strategy.DatabaseType))
+		progressCallback(strategyConfig.Name, fmt.Sprintf("Executing %s backup command...", strategyConfig.DatabaseType))
 	}
 
-	// Execute database-specific backup command
-	if err := bs.executeBackupWithProgress(timeoutCtx, strategy, backupPath, result, progressCallback); err != nil {
+	backupResult, err := dbStrategy.Backup(timeoutCtx, strategyConfig.DatabaseURL, backupPath, progressCallback)
+	if err != nil {
 		result.Error = err
 		result.Success = false
-		return result, result.Error
-	}
-
-	// Send progress update
-	if progressCallback != nil {
-		progressCallback(strategy.Name, "Database backup completed, processing file...")
-	}
-
-	// Compress if enabled (skip for MongoDB as it's already compressed)
-	if bs.config.Global.S3.Compression == "gzip" && strategy.DatabaseType != "mongodb" {
+		if backupResult != nil {
+			result.CommandLogs = backupResult.CommandLogs
+		}
 		if progressCallback != nil {
-			progressCallback(strategy.Name, "Compressing backup file...")
+			progressCallback(strategyConfig.Name, fmt.Sprintf("❌ Backup failed: %s", err.Error()))
 		}
-		compressedPath := backupPath + ".gz"
-		if err := bs.compressFile(backupPath, compressedPath); err != nil {
-			result.Error = fmt.Errorf("failed to compress backup: %w", err)
-			result.Success = false
-			return result, result.Error
-		}
-		// Remove original uncompressed file
-		os.Remove(backupPath)
-		backupPath = compressedPath
+		return result, err
 	}
 
-	// For MongoDB, the backup path might have been changed to .tar.gz
-	if strategy.DatabaseType == "mongodb" && !strings.HasSuffix(backupPath, ".tar.gz") {
-		backupPath = backupPath + ".tar.gz"
+	// Copy result data
+	if backupResult != nil {
+		result.CommandLogs = backupResult.CommandLogs
+		result.BackupPath = backupResult.BackupPath
 	}
 
-	// Get file size
-	fileInfo, err := os.Stat(backupPath)
-	if err != nil {
-		result.Error = fmt.Errorf("failed to get backup file info: %w", err)
+	// Handle compression
+	if err := bs.handleCompression(strategyConfig, &backupPath, progressCallback); err != nil {
+		result.Error = err
 		result.Success = false
-		return result, result.Error
+		if progressCallback != nil {
+			progressCallback(strategyConfig.Name, fmt.Sprintf("❌ Compression failed: %s", err.Error()))
+		}
+		return result, err
 	}
 
-	result.BackupPath = backupPath
-	result.Size = fileInfo.Size()
-	result.EndTime = time.Now()
-	result.Duration = result.EndTime.Sub(result.StartTime)
+	// Finalize result
+	if err := bs.finalizeResult(result, backupPath, progressCallback); err != nil {
+		result.Error = err
+		result.Success = false
+		if progressCallback != nil {
+			progressCallback(strategyConfig.Name, fmt.Sprintf("❌ Failed to finalize backup: %s", err.Error()))
+		}
+		return result, err
+	}
+
 	result.Success = true
-
-	// Send final progress update
-	if progressCallback != nil {
-		progressCallback(strategy.Name, fmt.Sprintf("Backup completed successfully (%s)", formatBytes(result.Size)))
-	}
-
 	bs.logger.WithFields(logrus.Fields{
-		"strategy": strategy.Name,
+		"strategy": strategyConfig.Name,
 		"size":     result.Size,
 		"duration": result.Duration,
 		"path":     backupPath,
@@ -235,516 +198,104 @@ func (bs *BackupService) ExecuteBackupWithProgress(ctx context.Context, strategy
 	return result, nil
 }
 
-// executeBackup executes the appropriate backup command based on database type
-func (bs *BackupService) executeBackup(ctx context.Context, strategy config.StrategyConfig, outputPath string, result *BackupResult) error {
-	switch strategy.DatabaseType {
-	case "postgres":
-		return bs.executePostgresBackup(ctx, strategy.DatabaseURL, outputPath, result)
-	case "mysql", "mariadb":
-		return bs.executeMySQLBackup(ctx, strategy.DatabaseURL, outputPath, result)
-	case "mongodb":
-		return bs.executeMongoBackup(ctx, strategy.DatabaseURL, outputPath, result)
-	default:
-		return fmt.Errorf("unsupported database type: %s", strategy.DatabaseType)
-	}
-}
-
-// executeBackupWithProgress executes the appropriate backup command based on database type with progress callbacks
-func (bs *BackupService) executeBackupWithProgress(ctx context.Context, strategy config.StrategyConfig, outputPath string, result *BackupResult, progressCallback ProgressCallback) error {
-	switch strategy.DatabaseType {
-	case "postgres":
-		return bs.executePostgresBackupWithProgress(ctx, strategy.DatabaseURL, outputPath, result, progressCallback)
-	case "mysql", "mariadb":
-		return bs.executeMySQLBackupWithProgress(ctx, strategy.DatabaseURL, outputPath, result, progressCallback)
-	case "mongodb":
-		return bs.executeMongoBackupWithProgress(ctx, strategy.DatabaseURL, outputPath, result, progressCallback)
-	default:
-		return fmt.Errorf("unsupported database type: %s", strategy.DatabaseType)
-	}
-}
-
-// executePostgresBackup executes the pg_dump command (renamed from executePgDump)
-func (bs *BackupService) executePostgresBackup(ctx context.Context, databaseURL, outputPath string, result *BackupResult) error {
-	args := []string{
-		databaseURL,
-		"--no-password",
-		"--verbose",
-		"--format=custom",
-		"--file=" + outputPath,
-	}
-
-	cmd := exec.CommandContext(ctx, "pg_dump", args...)
-
-	// Capture both stdout and stderr
-	output, err := cmd.CombinedOutput()
-
-	// Log the command execution
-	commandLog := fmt.Sprintf("Command: pg_dump %s", strings.Join(args, " "))
-	result.CommandLogs = append(result.CommandLogs, commandLog)
-
-	if len(output) > 0 {
-		outputLog := fmt.Sprintf("Output: %s", string(output))
-		result.CommandLogs = append(result.CommandLogs, outputLog)
-		bs.logger.WithField("strategy", result.Strategy).Debug(outputLog)
-	}
-
-	if err != nil {
-		return fmt.Errorf("pg_dump failed: %w", err)
-	}
-
-	return nil
-}
-
-// executePostgresBackupWithProgress executes the pg_dump command with progress callbacks
-func (bs *BackupService) executePostgresBackupWithProgress(ctx context.Context, databaseURL, outputPath string, result *BackupResult, progressCallback ProgressCallback) error {
-	if progressCallback != nil {
-		progressCallback(result.Strategy, "Starting PostgreSQL dump...")
-	}
-
-	args := []string{
-		databaseURL,
-		"--no-password",
-		"--verbose",
-		"--format=custom",
-		"--file=" + outputPath,
-	}
-
-	cmd := exec.CommandContext(ctx, "pg_dump", args...)
-
-	// Create pipes to capture real-time output
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return fmt.Errorf("failed to create stdout pipe: %w", err)
-	}
-	stderr, err := cmd.StderrPipe()
-	if err != nil {
-		return fmt.Errorf("failed to create stderr pipe: %w", err)
-	}
-
-	// Start the command
-	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("failed to start pg_dump: %w", err)
-	}
-
-	// Log the command execution
-	commandLog := fmt.Sprintf("Command: pg_dump %s", strings.Join(args, " "))
-	result.CommandLogs = append(result.CommandLogs, commandLog)
-
-	// Capture output in real-time
-	go bs.captureOutput(stdout, "stdout", result, progressCallback)
-	go bs.captureOutput(stderr, "stderr", result, progressCallback)
-
-	// Wait for command to complete
-	err = cmd.Wait()
-
-	if err != nil {
-		return fmt.Errorf("pg_dump failed: %w", err)
-	}
-
-	if progressCallback != nil {
-		progressCallback(result.Strategy, "PostgreSQL dump completed successfully")
-	}
-
-	return nil
-}
-
-// executeMySQLBackup executes the mysqldump command
-func (bs *BackupService) executeMySQLBackup(ctx context.Context, databaseURL, outputPath string, result *BackupResult) error {
-	// Parse MySQL connection string: mysql://user:password@host:port/database
-	// Remove the mysql:// prefix
-	connStr := strings.TrimPrefix(databaseURL, "mysql://")
-
-	// Parse user:password@host:port/database
-	var host, port, user, password, database string
-
-	if atIndex := strings.Index(connStr, "@"); atIndex != -1 {
-		userPass := connStr[:atIndex]
-		hostPortDB := connStr[atIndex+1:]
-
-		// Parse user:password
-		if colonIndex := strings.Index(userPass, ":"); colonIndex != -1 {
-			user = userPass[:colonIndex]
-			password = userPass[colonIndex+1:]
-		} else {
-			user = userPass
-		}
-
-		// Parse host:port/database
-		if slashIndex := strings.Index(hostPortDB, "/"); slashIndex != -1 {
-			hostPort := hostPortDB[:slashIndex]
-			database = hostPortDB[slashIndex+1:]
-
-			// Parse host:port
-			if colonIndex := strings.Index(hostPort, ":"); colonIndex != -1 {
-				host = hostPort[:colonIndex]
-				port = hostPort[colonIndex+1:]
-			} else {
-				host = hostPort
-				port = "3306" // default port
-			}
-		} else {
-			host = hostPortDB
-			port = "3306"
-		}
-	} else {
-		return fmt.Errorf("invalid MySQL connection URL format: %s", databaseURL)
-	}
-
-	if host == "" || user == "" || database == "" {
-		return fmt.Errorf("missing required connection parameters in URL: %s", databaseURL)
-	}
-
-	args := []string{
-		"--host=" + host,
-		"--port=" + port,
-		"--user=" + user,
-		"--password=" + password,
-		"--skip-ssl",
-		"--single-transaction",
-		"--routines",
-		"--triggers",
-		"--verbose",
-		"--result-file=" + outputPath,
-		database,
-	}
-
-	cmd := exec.CommandContext(ctx, "mariadb-dump", args...)
-
-	// Capture both stdout and stderr
-	output, err := cmd.CombinedOutput()
-
-	// Log the command execution (hide password)
-	safeArgs := make([]string, len(args))
-	copy(safeArgs, args)
-	for i, arg := range safeArgs {
-		if strings.HasPrefix(arg, "--password=") {
-			safeArgs[i] = "--password=***"
-		}
-	}
-	commandLog := fmt.Sprintf("Command: mariadb-dump %s", strings.Join(safeArgs, " "))
-	result.CommandLogs = append(result.CommandLogs, commandLog)
-
-	if len(output) > 0 {
-		outputLog := fmt.Sprintf("Output: %s", string(output))
-		result.CommandLogs = append(result.CommandLogs, outputLog)
-		bs.logger.WithField("strategy", result.Strategy).Info(outputLog)
-	}
-
-	if err != nil {
-		return fmt.Errorf("mariadb-dump failed: %w", err)
-	}
-
-	return nil
-}
-
-// executeMySQLBackupWithProgress executes the mariadb-dump command with progress callbacks
-func (bs *BackupService) executeMySQLBackupWithProgress(ctx context.Context, databaseURL, outputPath string, result *BackupResult, progressCallback ProgressCallback) error {
-	// Parse MySQL connection string: mysql://user:password@host:port/database
-	// Remove the mysql:// prefix
-	connStr := strings.TrimPrefix(databaseURL, "mysql://")
-
-	// Parse user:password@host:port/database
-	var host, port, user, password, database string
-
-	if atIndex := strings.Index(connStr, "@"); atIndex != -1 {
-		userPass := connStr[:atIndex]
-		hostPortDB := connStr[atIndex+1:]
-
-		// Parse user:password
-		if colonIndex := strings.Index(userPass, ":"); colonIndex != -1 {
-			user = userPass[:colonIndex]
-			password = userPass[colonIndex+1:]
-		} else {
-			user = userPass
-		}
-
-		// Parse host:port/database
-		if slashIndex := strings.Index(hostPortDB, "/"); slashIndex != -1 {
-			hostPort := hostPortDB[:slashIndex]
-			database = hostPortDB[slashIndex+1:]
-
-			// Parse host:port
-			if colonIndex := strings.Index(hostPort, ":"); colonIndex != -1 {
-				host = hostPort[:colonIndex]
-				port = hostPort[colonIndex+1:]
-			} else {
-				host = hostPort
-				port = "3306" // default port
-			}
-		} else {
-			host = hostPortDB
-			port = "3306"
-		}
-	} else {
-		return fmt.Errorf("invalid MySQL connection URL format: %s", databaseURL)
-	}
-
-	if host == "" || user == "" || database == "" {
-		return fmt.Errorf("missing required connection parameters in URL: %s", databaseURL)
-	}
-
-	if progressCallback != nil {
-		progressCallback(result.Strategy, fmt.Sprintf("Connecting to MySQL database %s@%s:%s", user, host, port))
-	}
-
-	args := []string{
-		"--host=" + host,
-		"--port=" + port,
-		"--user=" + user,
-		"--password=" + password,
-		"--skip-ssl",
-		"--single-transaction",
-		"--routines",
-		"--triggers",
-		"--verbose",
-		"--result-file=" + outputPath,
-		database,
-	}
-
-	cmd := exec.CommandContext(ctx, "mariadb-dump", args...)
-
-	// Create pipes to capture real-time output
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return fmt.Errorf("failed to create stdout pipe: %w", err)
-	}
-	stderr, err := cmd.StderrPipe()
-	if err != nil {
-		return fmt.Errorf("failed to create stderr pipe: %w", err)
-	}
-
-	// Start the command
-	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("failed to start mariadb-dump: %w", err)
-	}
-
-	// Log the command execution (hide password)
-	safeArgs := make([]string, len(args))
-	copy(safeArgs, args)
-	for i, arg := range safeArgs {
-		if strings.HasPrefix(arg, "--password=") {
-			safeArgs[i] = "--password=***"
-		}
-	}
-	commandLog := fmt.Sprintf("Command: mariadb-dump %s", strings.Join(safeArgs, " "))
-	result.CommandLogs = append(result.CommandLogs, commandLog)
-
-	// Capture output in real-time
-	go bs.captureOutput(stdout, "stdout", result, progressCallback)
-	go bs.captureOutput(stderr, "stderr", result, progressCallback)
-
-	// Wait for command to complete
-	err = cmd.Wait()
-
-	if err != nil {
-		return fmt.Errorf("mariadb-dump failed: %w", err)
-	}
-
-	if progressCallback != nil {
-		progressCallback(result.Strategy, "MySQL dump completed successfully")
-	}
-
-	return nil
-}
-
-// captureOutput captures command output in real-time and sends it via progress callback
-func (bs *BackupService) captureOutput(pipe io.ReadCloser, streamType string, result *BackupResult, progressCallback ProgressCallback) {
-	defer pipe.Close()
-
-	scanner := bufio.NewScanner(pipe)
-	var outputBuffer strings.Builder
-
-	for scanner.Scan() {
-		line := scanner.Text()
-		outputBuffer.WriteString(line)
-		outputBuffer.WriteString("\n")
-
-		// Only send error/warning lines to Slack in real-time
+// handleCompression handles file compression if enabled
+func (bs *BackupService) handleCompression(strategyConfig config.StrategyConfig, backupPath *string, progressCallback ProgressCallback) error {
+	// Compress if enabled (skip for MongoDB as it's already compressed)
+	if bs.config.Global.S3.Compression == "gzip" && strategyConfig.DatabaseType != "mongodb" {
 		if progressCallback != nil {
-			lineLower := strings.ToLower(line)
-			// Check if the line contains error/warning indicators
-			if strings.Contains(lineLower, "error") ||
-				strings.Contains(lineLower, "failed") ||
-				strings.Contains(lineLower, "failure") ||
-				strings.Contains(lineLower, "warning") ||
-				strings.Contains(lineLower, "warn") ||
-				strings.Contains(lineLower, "fatal") ||
-				strings.Contains(lineLower, "critical") {
-				progressCallback(result.Strategy, fmt.Sprintf("[%s] %s", streamType, line))
-			}
+			progressCallback(strategyConfig.Name, "Compressing backup file...")
 		}
+		compressedPath := *backupPath + ".gz"
+		if err := bs.compressFile(*backupPath, compressedPath); err != nil {
+			return fmt.Errorf("failed to compress backup: %w", err)
+		}
+		// Remove original uncompressed file
+		os.Remove(*backupPath)
+		*backupPath = compressedPath
 	}
 
-	// Store the complete output in command logs
-	if outputBuffer.Len() > 0 {
-		outputLog := fmt.Sprintf("Output (%s): %s", streamType, outputBuffer.String())
-		result.CommandLogs = append(result.CommandLogs, outputLog)
+	// For MongoDB, the backup path might have been changed to .tar.gz
+	if strategyConfig.DatabaseType == "mongodb" && !strings.HasSuffix(*backupPath, ".tar.gz") {
+		*backupPath = *backupPath + ".tar.gz"
 	}
+
+	return nil
 }
 
-// executeMongoBackup executes the mongodump command
-func (bs *BackupService) executeMongoBackup(ctx context.Context, databaseURL, outputPath string, result *BackupResult) error {
-	args := []string{
-		"--uri=" + databaseURL,
-		"--out=" + outputPath,
-		"--verbose",
-	}
-
-	cmd := exec.CommandContext(ctx, "mongodump", args...)
-
-	// Capture both stdout and stderr
-	output, err := cmd.CombinedOutput()
-
-	// Log the command execution (hide password in URI)
-	safeArgs := make([]string, len(args))
-	copy(safeArgs, args)
-	for i, arg := range safeArgs {
-		if strings.HasPrefix(arg, "--uri=") {
-			// Hide password in URI
-			uri := arg[6:] // Remove --uri= prefix
-			if strings.Contains(uri, "@") && strings.Contains(uri, ":") {
-				// mongodb://user:password@host:port/db -> mongodb://user:***@host:port/db
-				parts := strings.Split(uri, "@")
-				if len(parts) >= 2 {
-					userPass := parts[0]
-					if colonIndex := strings.Index(userPass, ":"); colonIndex != -1 {
-						userPart := userPass[:colonIndex]
-						safeUri := userPart + ":***@" + strings.Join(parts[1:], "@")
-						safeArgs[i] = "--uri=" + safeUri
-					}
-				}
-			}
-		}
-	}
-	commandLog := fmt.Sprintf("Command: mongodump %s", strings.Join(safeArgs, " "))
-	result.CommandLogs = append(result.CommandLogs, commandLog)
-
-	if len(output) > 0 {
-		outputLog := fmt.Sprintf("Output: %s", string(output))
-		result.CommandLogs = append(result.CommandLogs, outputLog)
-		bs.logger.WithField("strategy", result.Strategy).Info(outputLog)
-	}
-
+// finalizeResult finalizes the backup result with file information
+func (bs *BackupService) finalizeResult(result *BackupResult, backupPath string, progressCallback ProgressCallback) error {
+	// Get file size
+	fileInfo, err := os.Stat(backupPath)
 	if err != nil {
-		return fmt.Errorf("mongodump failed: %w", err)
+		return fmt.Errorf("failed to get backup file info: %w", err)
 	}
 
-	// For MongoDB, we need to create a tar archive of the dump directory
-	return bs.createMongoArchive(outputPath)
-}
+	result.BackupPath = backupPath
+	result.Size = fileInfo.Size()
+	result.EndTime = time.Now()
+	result.Duration = result.EndTime.Sub(result.StartTime)
 
-// executeMongoBackupWithProgress executes the mongodump command with progress callbacks
-func (bs *BackupService) executeMongoBackupWithProgress(ctx context.Context, databaseURL, outputPath string, result *BackupResult, progressCallback ProgressCallback) error {
+	// Send final progress update
 	if progressCallback != nil {
-		progressCallback(result.Strategy, "Starting MongoDB dump...")
+		progressCallback(result.Strategy, fmt.Sprintf("Backup completed successfully (%s)", formatBytes(result.Size)))
 	}
 
-	args := []string{
-		"--uri=" + databaseURL,
-		"--out=" + outputPath,
-		"--verbose",
-	}
-
-	cmd := exec.CommandContext(ctx, "mongodump", args...)
-
-	// Create pipes to capture real-time output
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return fmt.Errorf("failed to create stdout pipe: %w", err)
-	}
-	stderr, err := cmd.StderrPipe()
-	if err != nil {
-		return fmt.Errorf("failed to create stderr pipe: %w", err)
-	}
-
-	// Start the command
-	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("failed to start mongodump: %w", err)
-	}
-
-	// Log the command execution (hide password in URI)
-	safeArgs := make([]string, len(args))
-	copy(safeArgs, args)
-	for i, arg := range safeArgs {
-		if strings.HasPrefix(arg, "--uri=") {
-			// Hide password in URI
-			uri := arg[6:] // Remove --uri= prefix
-			if strings.Contains(uri, "@") && strings.Contains(uri, ":") {
-				// mongodb://user:password@host:port/db -> mongodb://user:***@host:port/db
-				parts := strings.Split(uri, "@")
-				if len(parts) >= 2 {
-					userPass := parts[0]
-					if colonIndex := strings.Index(userPass, ":"); colonIndex != -1 {
-						userPart := userPass[:colonIndex]
-						safeUri := userPart + ":***@" + strings.Join(parts[1:], "@")
-						safeArgs[i] = "--uri=" + safeUri
-					}
-				}
-			}
-		}
-	}
-	commandLog := fmt.Sprintf("Command: mongodump %s", strings.Join(safeArgs, " "))
-	result.CommandLogs = append(result.CommandLogs, commandLog)
-
-	// Capture output in real-time
-	go bs.captureOutput(stdout, "stdout", result, progressCallback)
-	go bs.captureOutput(stderr, "stderr", result, progressCallback)
-
-	// Wait for command to complete
-	err = cmd.Wait()
-
-	if err != nil {
-		return fmt.Errorf("mongodump failed: %w", err)
-	}
-
-	if progressCallback != nil {
-		progressCallback(result.Strategy, "MongoDB dump completed, creating archive...")
-	}
-
-	// For MongoDB, we need to create a tar archive of the dump directory
-	return bs.createMongoArchive(outputPath)
+	return nil
 }
 
-// createMongoArchive creates a tar archive from the mongodump output directory
-func (bs *BackupService) createMongoArchive(outputPath string) error {
-	// Create tar.gz archive from the mongodump directory
-	archivePath := outputPath + ".tar.gz"
+// generateBackupPath generates a backup file path
+func (bs *BackupService) generateBackupPath(strategy config.StrategyConfig, startTime time.Time) string {
+	// Generate backup filename with simplified format
+	timestamp := startTime.Format("20060102-150405")
+	filename := fmt.Sprintf("%s-%s", strategy.Name, timestamp)
 
-	cmd := exec.Command("tar", "-czf", archivePath, "-C", filepath.Dir(outputPath), filepath.Base(outputPath))
-
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		bs.logger.WithError(err).WithField("output", string(output)).Error("Failed to create MongoDB archive")
-		return fmt.Errorf("failed to create MongoDB archive: %w", err)
+	// Add appropriate extension based on database type
+	switch strategy.DatabaseType {
+	case "postgres":
+		filename += ".dump"
+	case "mysql", "mariadb":
+		filename += ".sql"
+	case "mongodb":
+		filename += ".archive"
+	default:
+		filename += ".backup"
 	}
 
-	// Remove the original directory
-	if err := os.RemoveAll(outputPath); err != nil {
-		bs.logger.WithError(err).Warn("Failed to remove MongoDB dump directory")
+	return filepath.Join(bs.config.Global.TempDir, filename)
+}
+
+// CleanupTempFiles removes temporary backup files
+func (bs *BackupService) CleanupTempFiles(filePath string) error {
+	if filePath == "" {
+		return nil
 	}
 
-	bs.logger.WithField("archive", archivePath).Info("Created MongoDB archive")
+	if err := os.Remove(filePath); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("failed to remove temporary file %s: %w", filePath, err)
+	}
+
+	bs.logger.WithField("file", filePath).Debug("Cleaned up temporary backup file")
 	return nil
 }
 
 // compressFile compresses a file using gzip
-func (bs *BackupService) compressFile(sourcePath, destPath string) error {
-	sourceFile, err := os.Open(sourcePath)
+func (bs *BackupService) compressFile(srcPath, dstPath string) error {
+	srcFile, err := os.Open(srcPath)
 	if err != nil {
 		return fmt.Errorf("failed to open source file: %w", err)
 	}
-	defer sourceFile.Close()
+	defer srcFile.Close()
 
-	destFile, err := os.Create(destPath)
+	dstFile, err := os.Create(dstPath)
 	if err != nil {
 		return fmt.Errorf("failed to create destination file: %w", err)
 	}
-	defer destFile.Close()
+	defer dstFile.Close()
 
-	gzipWriter := gzip.NewWriter(destFile)
+	gzipWriter := gzip.NewWriter(dstFile)
 	defer gzipWriter.Close()
 
-	_, err = io.Copy(gzipWriter, sourceFile)
+	_, err = io.Copy(gzipWriter, srcFile)
 	if err != nil {
 		return fmt.Errorf("failed to compress file: %w", err)
 	}
@@ -752,19 +303,7 @@ func (bs *BackupService) compressFile(sourcePath, destPath string) error {
 	return nil
 }
 
-// CleanupTempFiles removes temporary backup files
-func (bs *BackupService) CleanupTempFiles(backupPath string) error {
-	if backupPath != "" {
-		if err := os.Remove(backupPath); err != nil && !os.IsNotExist(err) {
-			bs.logger.WithError(err).WithField("path", backupPath).Warn("Failed to cleanup temp file")
-			return err
-		}
-		bs.logger.WithField("path", backupPath).Debug("Cleaned up temp file")
-	}
-	return nil
-}
-
-// formatBytes formats bytes into human readable format
+// formatBytes formats byte size to human readable format
 func formatBytes(bytes int64) string {
 	const unit = 1024
 	if bytes < unit {
@@ -776,23 +315,4 @@ func formatBytes(bytes int64) string {
 		exp++
 	}
 	return fmt.Sprintf("%.1f %cB", float64(bytes)/float64(div), "KMGTPE"[exp])
-}
-
-// generateBackupPath creates a simplified backup file path
-func (bs *BackupService) generateBackupPath(strategy config.StrategyConfig, timestamp time.Time) string {
-	// Simplified timestamp format: YYYYMMDD-HHMMSS
-	timeStr := timestamp.Format("20060102-150405")
-
-	// Simplified filename: strategy-YYYYMMDD-HHMMSS.ext
-	var filename string
-	switch strategy.DatabaseType {
-	case "mongodb":
-		// MongoDB creates a directory, no extension needed
-		filename = fmt.Sprintf("%s-%s", strategy.Name, timeStr)
-	default:
-		// All SQL databases use .sql extension
-		filename = fmt.Sprintf("%s-%s.sql", strategy.Name, timeStr)
-	}
-
-	return filepath.Join(bs.config.Global.TempDir, filename)
 }
