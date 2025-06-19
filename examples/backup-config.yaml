@@ -8,6 +8,9 @@ global:
   timezone: "UTC"
   temp_dir: "/tmp/db-backup"
   max_parallel_strategies: 1
+  # Execute all backup strategies immediately when the service starts
+  # Set to true for demo to see immediate backup execution
+  execute_on_startup: true
   retry:
     max_attempts: 3
   timeout:

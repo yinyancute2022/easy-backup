@@ -8,6 +8,7 @@ import (
 	"os/signal"
 	"sync"
 	"syscall"
+	"time"
 
 	"easy-backup/internal/backup"
 	"easy-backup/internal/config"
@@ -105,6 +106,16 @@ func main() {
 	}
 
 	log.Info("Easy Backup service started successfully")
+
+	// Execute all strategies on startup if configured
+	if cfg.Global.ExecuteOnStartup {
+		log.Info("ExecuteOnStartup is enabled, triggering all backup strategies immediately")
+		go func() {
+			// Give the service a moment to fully initialize
+			time.Sleep(2 * time.Second)
+			schedulerService.ExecuteAllStrategiesManually()
+		}()
+	}
 
 	// Wait for shutdown signal
 	<-sigChan

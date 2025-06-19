@@ -47,6 +47,7 @@ global:
   log_level: "info"
   schedule: "0 2 * * *" # Daily at 2 AM
   retention: "30d"
+  execute_on_startup: false # Execute all strategies immediately on boot
   s3:
     bucket: "my-backup-bucket"
     base_path: "database-backups"
@@ -106,6 +107,30 @@ Execute backups manually without running the scheduler service:
 - CI/CD pipeline integration
 - Troubleshooting specific strategies
 
+## Execute on Startup
+
+Configure the service to execute all backup strategies immediately when it starts, before the scheduled intervals:
+
+```yaml
+global:
+  execute_on_startup: true # Execute all strategies immediately on boot
+```
+
+**Use Cases:**
+
+- **Initial Backup**: Ensure you have a backup immediately after deployment
+- **Recovery Scenarios**: Get fresh backups after service restarts
+- **Development/Testing**: Quickly verify backup functionality
+- **Scheduled Maintenance**: Combine with scheduled restarts for regular backups
+
+**Behavior:**
+
+- Executes all configured strategies sequentially on service startup
+- Uses the same retry logic and error handling as scheduled backups
+- Sends Slack notifications and uploads to S3 as configured
+- Does not interfere with regular scheduled backups
+- Service continues running normally after startup execution
+
 ## Monitoring
 
 ### Health Check
@@ -136,17 +161,18 @@ schedule: "0 6 1 * *"        # Monthly on 1st at 6 AM
 
 ### Global Settings
 
-| Setting            | Description             | Example                   |
-| ------------------ | ----------------------- | ------------------------- |
-| `slack.bot_token`  | Slack bot token         | `xoxb-...`                |
-| `slack.channel_id` | Slack channel ID        | `C0123456789`             |
-| `log_level`        | Logging level           | `info`, `debug`, `error`  |
-| `schedule`         | Default backup schedule | `0 2 * * *`               |
-| `retention`        | Backup retention period | `30d`, `7d`, `1h`         |
-| `timezone`         | Timezone for schedules  | `UTC`, `America/New_York` |
-| `s3.bucket`        | S3 bucket name          | `my-backup-bucket`        |
-| `s3.base_path`     | S3 path prefix          | `database-backups`        |
-| `s3.compression`   | Compression type        | `gzip`, `none`            |
+| Setting              | Description                            | Example                   |
+| -------------------- | -------------------------------------- | ------------------------- |
+| `slack.bot_token`    | Slack bot token                        | `xoxb-...`                |
+| `slack.channel_id`   | Slack channel ID                       | `C0123456789`             |
+| `log_level`          | Logging level                          | `info`, `debug`, `error`  |
+| `schedule`           | Default backup schedule                | `0 2 * * *`               |
+| `retention`          | Backup retention period                | `30d`, `7d`, `1h`         |
+| `timezone`           | Timezone for schedules                 | `UTC`, `America/New_York` |
+| `execute_on_startup` | Execute all strategies on service boot | `true`, `false`           |
+| `s3.bucket`          | S3 bucket name                         | `my-backup-bucket`        |
+| `s3.base_path`       | S3 path prefix                         | `database-backups`        |
+| `s3.compression`     | Compression type                       | `gzip`, `none`            |
 
 ### Strategy Settings
 

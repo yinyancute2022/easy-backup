@@ -92,6 +92,13 @@ make integration-test-quick
 - **Testing support**: Validate configurations before scheduling
 - **Troubleshooting**: Execute strategies in isolation
 
+#### Startup Execution
+
+- **Execute on startup**: Configurable immediate execution of all strategies when service starts
+- **Deployment integration**: Ensures backups are created immediately after deployment
+- **Recovery scenarios**: Provides fresh backups after service restarts
+- **Development workflow**: Quick backup verification during development
+
 ## Development Workflow
 
 ### Building

@@ -18,17 +18,18 @@ type Config struct {
 
 // GlobalConfig contains default configurations for all strategies
 type GlobalConfig struct {
-	Slack       SlackConfig      `yaml:"slack"`
-	LogLevel    string           `yaml:"log_level"`
-	Schedule    string           `yaml:"schedule"`
-	Retention   string           `yaml:"retention"`
-	Timezone    string           `yaml:"timezone"`
-	TempDir     string           `yaml:"temp_dir"`
-	MaxParallel int              `yaml:"max_parallel_strategies"`
-	Retry       RetryConfig      `yaml:"retry"`
-	Timeout     TimeoutConfig    `yaml:"timeout"`
-	S3          S3Config         `yaml:"s3"`
-	Monitoring  MonitoringConfig `yaml:"monitoring"`
+	Slack            SlackConfig      `yaml:"slack"`
+	LogLevel         string           `yaml:"log_level"`
+	Schedule         string           `yaml:"schedule"`
+	Retention        string           `yaml:"retention"`
+	Timezone         string           `yaml:"timezone"`
+	TempDir          string           `yaml:"temp_dir"`
+	MaxParallel      int              `yaml:"max_parallel_strategies"`
+	ExecuteOnStartup bool             `yaml:"execute_on_startup"`
+	Retry            RetryConfig      `yaml:"retry"`
+	Timeout          TimeoutConfig    `yaml:"timeout"`
+	S3               S3Config         `yaml:"s3"`
+	Monitoring       MonitoringConfig `yaml:"monitoring"`
 }
 
 // SlackConfig contains Slack notification settings
