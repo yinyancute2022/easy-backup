@@ -233,36 +233,162 @@ example-test:
 	@echo "Running Docker Compose example test..."
 	./examples/test.sh
 
+# Integration test - comprehensive check after changes
+.PHONY: integration-test
+integration-test: clean
+	@echo "=========================================="
+	@echo "🧪 Running Integration Test Suite"
+	@echo "=========================================="
+
+	@echo "\n📋 Step 1: Installing dependencies..."
+	$(MAKE) deps
+
+	@echo "\n🔍 Step 2: Formatting code..."
+	$(MAKE) fmt
+
+	@echo "\n🔍 Step 3: Vetting code..."
+	$(MAKE) vet
+
+	@echo "\n🧪 Step 4: Running unit tests..."
+	$(MAKE) test
+
+	@echo "\n🔨 Step 5: Building for current platform..."
+	$(MAKE) build
+
+	@echo "\n✅ Step 6: Testing binary execution..."
+	@echo "Testing easy-backup binary..."
+	@if ./$(DIST_DIR)/$(BINARY_NAME) -h >/dev/null 2>&1; then \
+		echo "✅ easy-backup binary works"; \
+	else \
+		echo "❌ easy-backup binary failed"; \
+		exit 1; \
+	fi
+
+	@echo "Testing config-validator binary..."
+	@if ./$(DIST_DIR)/$(CONFIG_VALIDATOR) -h >/dev/null 2>&1; then \
+		echo "✅ config-validator binary works"; \
+	else \
+		echo "❌ config-validator binary failed"; \
+		exit 1; \
+	fi
+
+	@echo "\n📝 Step 7: Validating example configuration..."
+	@if [ -f config.example.yaml ]; then \
+		./$(DIST_DIR)/$(CONFIG_VALIDATOR) -config config.example.yaml && echo "✅ config.example.yaml is valid"; \
+	else \
+		echo "⚠️  config.example.yaml not found, skipping validation"; \
+	fi
+
+	@echo "\n🐳 Step 8: Testing Docker build..."
+	@if command -v docker >/dev/null 2>&1; then \
+		$(MAKE) docker-build && echo "✅ Docker build successful"; \
+	else \
+		echo "⚠️  Docker not found, skipping Docker build test"; \
+	fi
+
+	@echo "\n🏗️  Step 9: Building for all platforms..."
+	$(MAKE) build-all
+
+	@echo "\n📊 Step 10: Generating test coverage report..."
+	$(MAKE) test-coverage
+
+	@echo "\n🔒 Step 11: Running security checks..."
+	@if command -v gosec >/dev/null 2>&1; then \
+		$(MAKE) security && echo "✅ Security checks passed"; \
+	else \
+		echo "⚠️  gosec not installed, skipping security checks"; \
+		echo "   Install with: go install github.com/securecodewarrior/gosec/v2/cmd/gosec@latest"; \
+	fi
+
+	@echo "\n=========================================="
+	@echo "🎉 Integration Test Suite Completed!"
+	@echo "=========================================="
+	@echo "📦 Binaries built for all platforms:"
+	@ls -la $(DIST_DIR)/ | grep -E '\.(exe|)$$' || true
+	@echo "\n📊 Coverage report: coverage.html"
+	@echo "🐳 Docker image: $(DOCKER_IMAGE):$(DOCKER_TAG)"
+	@echo "✅ All checks passed! Ready for release."
+
+# Quick integration test (faster version without cross-platform builds)
+.PHONY: integration-test-quick
+integration-test-quick: clean
+	@echo "=========================================="
+	@echo "⚡ Running Quick Integration Test"
+	@echo "=========================================="
+
+	@echo "\n📋 Installing dependencies..."
+	$(MAKE) deps
+
+	@echo "\n🔍 Code quality checks..."
+	$(MAKE) fmt vet
+
+	@echo "\n🧪 Running tests..."
+	$(MAKE) test
+
+	@echo "\n🔨 Building for current platform..."
+	$(MAKE) build
+
+	@echo "\n✅ Testing binaries..."
+	@./$(DIST_DIR)/$(BINARY_NAME) -h >/dev/null 2>&1 && echo "✅ easy-backup works"
+	@./$(DIST_DIR)/$(CONFIG_VALIDATOR) -h >/dev/null 2>&1 && echo "✅ config-validator works"
+
+	@echo "\n📝 Validating configuration..."
+	@if [ -f config.example.yaml ]; then \
+		./$(DIST_DIR)/$(CONFIG_VALIDATOR) -config config.example.yaml && echo "✅ Configuration valid"; \
+	fi
+
+	@echo "\n🎉 Quick Integration Test Completed!"
+
 # Show help
 .PHONY: help
 help:
 	@echo "Available targets:"
-	@echo "  all           - Run clean, deps, test, and build"
-	@echo "  deps          - Install dependencies"
-	@echo "  fmt           - Format Go code"
-	@echo "  vet           - Vet Go code"
-	@echo "  test          - Run tests"
-	@echo "  test-coverage - Run tests with coverage report"
-	@echo "  test-short    - Run short tests"
-	@echo "  build         - Build for current platform"
-	@echo "  build-all     - Build for all platforms"
-	@echo "  docker-build  - Build Docker image"
-	@echo "  docker-push   - Build and push Docker image"
-	@echo "  run           - Run the application locally"
-	@echo "  validate-config - Run config validator"
-	@echo "  dev           - Start development server with hot reload"
-	@echo "  clean         - Clean build artifacts"
-	@echo "  clean-dist    - Clean dist directory"
-	@echo "  clean-test    - Clean test artifacts"
-	@echo "  update-deps   - Update dependencies"
-	@echo "  security      - Run security checks"
-	@echo "  mocks         - Generate mocks"
-	@echo "  release       - Prepare release build"
-	@echo "  install-tools - Install development tools"
-	@echo "  example-up    - Start Docker Compose example environment"
-	@echo "  example-down  - Stop Docker Compose example environment"
-	@echo "  example-logs  - Show Docker Compose example logs"
-	@echo "  example-clean - Clean Docker Compose example environment"
-	@echo "  example-status - Show Docker Compose example status"
-	@echo "  example-test  - Run Docker Compose example test"
-	@echo "  help          - Show this help message"
+	@echo ""
+	@echo "🔧 Build & Test:"
+	@echo "  all                - Run clean, deps, test, and build"
+	@echo "  deps               - Install dependencies"
+	@echo "  fmt                - Format Go code"
+	@echo "  vet                - Vet Go code"
+	@echo "  test               - Run tests"
+	@echo "  test-coverage      - Run tests with coverage report"
+	@echo "  test-short         - Run short tests"
+	@echo "  build              - Build for current platform"
+	@echo "  build-all          - Build for all platforms"
+	@echo ""
+	@echo "🧪 Integration Testing:"
+	@echo "  integration-test       - Full integration test (recommended after changes)"
+	@echo "  integration-test-quick - Quick integration test (faster, current platform only)"
+	@echo ""
+	@echo "🐳 Docker:"
+	@echo "  docker-build       - Build Docker image"
+	@echo "  docker-push        - Build and push Docker image"
+	@echo ""
+	@echo "🚀 Run & Validate:"
+	@echo "  run                - Run the application locally"
+	@echo "  validate-config    - Run config validator"
+	@echo "  dev                - Start development server with hot reload"
+	@echo ""
+	@echo "🧹 Cleanup:"
+	@echo "  clean              - Clean build artifacts"
+	@echo "  clean-dist         - Clean dist directory"
+	@echo "  clean-test         - Clean test artifacts"
+	@echo ""
+	@echo "🔒 Security & Quality:"
+	@echo "  security           - Run security checks"
+	@echo "  update-deps        - Update dependencies"
+	@echo "  mocks              - Generate mocks"
+	@echo ""
+	@echo "📦 Release:"
+	@echo "  release            - Prepare release build"
+	@echo "  install-tools      - Install development tools"
+	@echo ""
+	@echo "🐳 Examples:"
+	@echo "  example-up         - Start Docker Compose example environment"
+	@echo "  example-down       - Stop Docker Compose example environment"
+	@echo "  example-logs       - Show Docker Compose example logs"
+	@echo "  example-clean      - Clean Docker Compose example environment"
+	@echo "  example-status     - Show Docker Compose example status"
+	@echo "  example-test       - Run Docker Compose example test"
+	@echo ""
+	@echo "📚 Help:"
+	@echo "  help               - Show this help message"

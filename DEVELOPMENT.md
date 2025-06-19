@@ -4,7 +4,7 @@ This guide covers how to develop, build, test, and deploy the Easy Backup tool.
 
 ## Prerequisites
 
-- Go 1.21 or later
+- Go 1.24 or later
 - Make
 - Docker (for containerized builds)
 - PostgreSQL client tools (for testing)
@@ -67,6 +67,32 @@ make test-coverage
 make test-short
 ```
 
+### Integration Testing
+
+After making changes to the codebase, use the integration test targets to ensure everything works:
+
+```bash
+# Quick integration test (recommended for development)
+# Runs: deps, fmt, vet, test, build, binary validation, config validation
+make integration-test-quick
+
+# Full integration test (recommended before commits/releases)
+# Additionally runs: cross-platform builds, docker build, security checks
+make integration-test
+```
+
+The integration tests provide a comprehensive check that:
+
+- ✅ All dependencies are properly installed
+- ✅ Code is formatted and vetted
+- ✅ All unit tests pass
+- ✅ Binaries build successfully
+- ✅ Binaries execute without errors
+- ✅ Configuration files are valid
+- ✅ Docker images build (full test only)
+- ✅ Security checks pass (full test only)
+- ✅ Cross-platform builds work (full test only)
+
 ### Code Quality
 
 ```bash
@@ -101,7 +127,7 @@ make validate-config
 
 | Target            | Description                              |
 | ----------------- | ---------------------------------------- |
-| `all`             | Run clean, deps, test, and build        |
+| `all`             | Run clean, deps, test, and build         |
 | `deps`            | Install dependencies                     |
 | `fmt`             | Format Go code                           |
 | `vet`             | Vet Go code                              |
@@ -321,7 +347,7 @@ The project includes GitHub Actions for:
 
 ### Build Issues
 
-1. Ensure Go 1.21+ is installed
+1. Ensure Go 1.24+ is installed
 2. Run `make deps` to update dependencies
 3. Check for missing development tools with `make install-tools`
 
