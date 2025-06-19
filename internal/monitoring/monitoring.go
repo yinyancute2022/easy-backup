@@ -157,7 +157,7 @@ func (ms *MonitoringService) healthCheckHandler(w http.ResponseWriter, r *http.R
 		// Check if it's a scope issue vs a real connectivity issue
 		if strings.Contains(err.Error(), "missing_scope") {
 			slackStatus = "limited" // New status for scope limitations
-			ms.logger.WithError(err).Info("Slack health check shows limited permissions - basic functionality should work")
+			ms.logger.WithField("status", "limited").Debug("Slack health check shows limited permissions - basic functionality should work")
 		} else {
 			slackStatus = "error"
 			ms.logger.WithError(err).Warn("Slack health check failed")
