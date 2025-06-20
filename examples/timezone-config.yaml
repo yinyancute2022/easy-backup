@@ -1,0 +1,90 @@
+# Example configuration demonstrating timezone functionality
+# This config shows how different timezones affect backup scheduling
+
+global:
+  slack:
+    bot_token: "xoxb-test-token"
+    channel_id: "C1234567890"
+  log_level: "info"
+
+  # Global timezone - all strategies inherit this unless overridden
+  timezone: "America/New_York" # Eastern Time (UTC-5/UTC-4 with DST)
+
+  # Default schedule: 2 AM Eastern Time daily
+  schedule: "0 2 * * *"
+  retention: "7d"
+  temp_dir: "/tmp/db-backup"
+  execute_on_startup: false
+
+  s3:
+    bucket: "test-backup-bucket"
+    base_path: "timezone-test-backups"
+    compression: "gzip"
+    credentials:
+      access_key: "test-access-key"
+      secret_key: "test-secret-key"
+      region: "us-east-1"
+
+strategies:
+  # East Coast database - uses global timezone (America/New_York)
+  # Backup at 2 AM ET daily
+  - name: "east-coast-db"
+    database_type: "postgres"
+    database_url: "postgres://user:pass@east-db:5432/production"
+    # Inherits global schedule: 2 AM ET
+
+  # European database - different schedule in Eastern timezone
+  # This will be 8 AM ET = 1 PM GMT/2 PM BST
+  - name: "european-db"
+    database_type: "mysql"
+    database_url: "mysql://user:pass@eu-db:3306/app_data"
+    schedule: "0 8 * * *" # 8 AM Eastern = afternoon in Europe
+
+  # West Coast database - early morning backup
+  # 5 AM ET = 2 AM PT (good for west coast maintenance window)
+  - name: "west-coast-db"
+    database_type: "mongodb"
+    database_url: "mongodb://user:pass@west-db:27017/logs"
+    schedule: "0 5 * * *" # 5 AM Eastern
+
+  # High-frequency backup during business hours (Eastern time)
+  # Every 4 hours from 8 AM to 8 PM ET
+  - name: "critical-transactional-db"
+    database_type: "postgres"
+    database_url: "postgres://user:pass@critical-db:5432/transactions"
+    schedule: "0 8,12,16,20 * * *" # 8 AM, 12 PM, 4 PM, 8 PM ET
+    retention: "3d" # Shorter retention for frequent backups
+
+  # Weekend-only backup
+  # Saturday 1 AM ET (good for weekly maintenance)
+  - name: "analytics-db"
+    database_type: "postgres"
+    database_url: "postgres://user:pass@analytics-db:5432/warehouse"
+    schedule: "0 1 * * 6" # Saturday 1 AM ET
+    retention: "30d"
+# Example schedules for different timezone scenarios:
+#
+# For UTC coordination (multi-region):
+# timezone: "UTC"
+# schedule: "0 6 * * *"   # 6 AM UTC = 1 AM EST, 2 AM EDT
+#
+# For West Coast (Pacific Time):
+# timezone: "America/Los_Angeles"
+# schedule: "0 2 * * *"   # 2 AM PT daily
+#
+# For Europe (Central European Time):
+# timezone: "Europe/Paris"
+# schedule: "0 3 * * *"   # 3 AM CET/CEST daily
+#
+# For Asia Pacific (Japan):
+# timezone: "Asia/Tokyo"
+# schedule: "0 4 * * *"   # 4 AM JST daily
+#
+# Mixed timezone example:
+# strategies:
+#   - name: "us-backup"
+#     schedule: "0 7 * * *"    # 2 AM EST/3 AM EDT when global is UTC
+#   - name: "eu-backup"
+#     schedule: "0 1 * * *"    # 1 AM GMT/2 AM BST when global is UTC
+#   - name: "asia-backup"
+#     schedule: "0 17 * * *"   # 2 AM JST when global is UTC

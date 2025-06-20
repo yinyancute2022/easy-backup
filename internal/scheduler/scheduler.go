@@ -98,6 +98,16 @@ func (ss *SchedulerService) Start() error {
 	return nil
 }
 
+// GetCronLocation returns the timezone location used by the cron scheduler
+func (ss *SchedulerService) GetCronLocation() *time.Location {
+	return ss.cron.Location()
+}
+
+// GetNextRunTime calculates the next run time for a schedule and returns it as RFC3339 string
+func (ss *SchedulerService) GetNextRunTime(schedule string) string {
+	return ss.getNextRunTime(schedule)
+}
+
 // Stop stops the scheduler
 func (ss *SchedulerService) Stop() {
 	ss.logger.Info("Stopping backup scheduler")
@@ -311,6 +321,7 @@ func (ss *SchedulerService) getNextRunTime(schedule string) string {
 		return ""
 	}
 
+	// Create parser with location to match the cron scheduler's timezone behavior
 	parser := cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow)
 	sched, err := parser.Parse(cronExpr)
 	if err != nil {
@@ -318,7 +329,9 @@ func (ss *SchedulerService) getNextRunTime(schedule string) string {
 		return ""
 	}
 
-	nextTime := sched.Next(time.Now())
+	// Use current time in the scheduler's timezone for calculation
+	now := time.Now().In(ss.cron.Location())
+	nextTime := sched.Next(now)
 	return nextTime.UTC().Format(time.RFC3339)
 }
 

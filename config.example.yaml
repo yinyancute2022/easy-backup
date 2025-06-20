@@ -8,8 +8,11 @@ global:
   # - "*/15 * * * *" (every 15 minutes)
   # - "0 */6 * * *" (every 6 hours)
   # - "0 0 * * 0" (weekly on Sunday at midnight)
-  schedule: "0 2 * * *" # Daily at 2 AM UTC
+  schedule: "0 2 * * *" # Daily at 2 AM in specified timezone
   retention: "30d"
+  # Timezone for all cron schedules (IANA timezone format)
+  # Examples: UTC, America/New_York, Europe/London, Asia/Tokyo
+  # All schedules will be executed in this timezone
   timezone: "UTC"
   temp_dir: "/tmp/db-backup"
   max_parallel_strategies: 2

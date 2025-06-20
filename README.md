@@ -157,108 +157,122 @@ schedule: "0 0 * * 1"        # Weekly on Monday
 schedule: "0 6 1 * *"        # Monthly on 1st at 6 AM
 ```
 
-## Configuration Reference
+## Timezone Configuration
 
-### Global Settings
+The `timezone` setting controls when scheduled backups execute. All cron schedules are interpreted in the specified timezone.
 
-| Setting              | Description                            | Example                   |
-| -------------------- | -------------------------------------- | ------------------------- |
-| `slack.bot_token`    | Slack bot token                        | `xoxb-...`                |
-| `slack.channel_id`   | Slack channel ID                       | `C0123456789`             |
-| `log_level`          | Logging level                          | `info`, `debug`, `error`  |
-| `schedule`           | Default backup schedule                | `0 2 * * *`               |
-| `retention`          | Backup retention period                | `30d`, `7d`, `1h`         |
-| `timezone`           | Timezone for schedules                 | `UTC`, `America/New_York` |
-| `execute_on_startup` | Execute all strategies on service boot | `true`, `false`           |
-| `s3.bucket`          | S3 bucket name                         | `my-backup-bucket`        |
-| `s3.base_path`       | S3 path prefix                         | `database-backups`        |
-| `s3.compression`     | Compression type                       | `gzip`, `none`            |
+### Supported Timezone Formats
 
-### Strategy Settings
-
-| Setting         | Description               | Example                             |
-| --------------- | ------------------------- | ----------------------------------- |
-| `name`          | Strategy identifier       | `postgres-prod`                     |
-| `database_type` | Database type             | `postgres`, `mysql`, `mongodb`      |
-| `database_url`  | Database connection URL   | `postgres://user:pass@host:5432/db` |
-| `schedule`      | Override global schedule  | `0 */6 * * *`                       |
-| `retention`     | Override global retention | `7d`                                |
-
-### Database URL Formats
-
-```bash
-# PostgreSQL
-postgres://username:password@hostname:5432/database
-
-# MySQL/MariaDB
-mysql://username:password@hostname:3306/database
-
-# MongoDB
-mongodb://username:password@hostname:27017/database
-```
-
-## Environment Variables
-
-You can use environment variables in your configuration:
+Easy Backup supports standard IANA timezone identifiers:
 
 ```yaml
 global:
-  slack:
-    bot_token: "${SLACK_BOT_TOKEN}"
-  s3:
-    bucket: "${S3_BUCKET}"
-    credentials:
-      access_key: "${AWS_ACCESS_KEY_ID}"
-      secret_key: "${AWS_SECRET_ACCESS_KEY}"
+  timezone: "UTC"                    # Coordinated Universal Time (default)
+  timezone: "America/New_York"       # Eastern Time (US & Canada)
+  timezone: "America/Los_Angeles"    # Pacific Time (US & Canada)
+  timezone: "Europe/London"          # Greenwich Mean Time / British Summer Time
+  timezone: "Europe/Paris"           # Central European Time
+  timezone: "Asia/Tokyo"             # Japan Standard Time
+  timezone: "Asia/Shanghai"          # China Standard Time
+  timezone: "Australia/Sydney"       # Australian Eastern Time
+```
+
+### How Timezone Affects Scheduling
+
+When you set a timezone, all cron expressions are evaluated in that timezone:
+
+```yaml
+global:
+  timezone: "America/New_York"
+  schedule: "0 2 * * *" # 2 AM Eastern Time daily
 
 strategies:
   - name: "postgres-prod"
-    database_url: "${DATABASE_URL}"
+    schedule: "0 14 * * *" # 2 PM Eastern Time daily
 ```
 
-## Examples
+### Timezone Examples
 
-See the `examples/` directory for:
-
-- Complete Docker Compose setup
-- Sample configuration files
-- Test data generation scripts
-
-## Troubleshooting
-
-### Common Issues
-
-1. **Database Connection Failed**
-
-   - Verify database URL format
-   - Check network connectivity
-   - Ensure database client tools are installed
-
-2. **S3 Upload Failed**
-
-   - Verify AWS credentials
-   - Check bucket permissions
-   - Ensure bucket exists
-
-3. **Slack Notifications Not Working**
-   - Verify bot token format (starts with `xoxb-`)
-   - Check channel ID (not channel name)
-   - Ensure bot has permissions to post
-
-### Debug Mode
-
-Enable debug logging for troubleshooting:
+#### Business Hours Backup (9 AM local time)
 
 ```yaml
 global:
-  log_level: "debug"
+  timezone: "America/New_York" # Eastern timezone
+  schedule: "0 9 * * *" # 9 AM ET daily
 ```
 
-## License
+#### Off-Hours Backup (2 AM local time)
 
-This project is licensed under the MIT License.
+```yaml
+global:
+  timezone: "Europe/London" # UK timezone
+  schedule: "0 2 * * *" # 2 AM GMT/BST daily
+```
 
-## Support
+#### Multi-Region Setup
 
-- [GitHub Issues](https://github.com/yinyancute2022/db-backup/issues)
-- [Documentation](https://github.com/yinyancute2022/db-backup/tree/main/examples)
+```yaml
+global:
+  timezone: "UTC" # Global coordination
+
+strategies:
+  - name: "us-east-db"
+    schedule: "0 7 * * *" # 2 AM ET (UTC-5) or 3 AM EDT (UTC-4)
+  - name: "eu-db"
+    schedule: "0 1 * * *" # 1 AM GMT (UTC+0) or 2 AM BST (UTC+1)
+  - name: "asia-db"
+    schedule: "0 18 * * *" # 3 AM JST (UTC+9)
+```
+
+### Daylight Saving Time
+
+Easy Backup automatically handles daylight saving time transitions:
+
+- **Spring forward**: Skipped time slots are handled gracefully
+- **Fall back**: Duplicate time slots execute only once
+- **Timezone changes**: Automatic adjustment for DST boundaries
+
+### Timezone Validation
+
+Invalid timezones fall back to UTC with a warning:
+
+```yaml
+global:
+  timezone: "Invalid/Timezone" # Falls back to UTC
+```
+
+Check logs for timezone loading errors:
+
+```bash
+# Look for timezone warnings in logs
+docker logs easy-backup | grep -i timezone
+```
+
+### Common Timezone Identifiers
+
+| Region          | Timezone Identifier   | Description                   |
+| --------------- | --------------------- | ----------------------------- |
+| **UTC**         | `UTC`                 | Coordinated Universal Time    |
+| **US East**     | `America/New_York`    | Eastern Time (EDT/EST)        |
+| **US Central**  | `America/Chicago`     | Central Time (CDT/CST)        |
+| **US Mountain** | `America/Denver`      | Mountain Time (MDT/MST)       |
+| **US Pacific**  | `America/Los_Angeles` | Pacific Time (PDT/PST)        |
+| **UK**          | `Europe/London`       | Greenwich Mean Time (GMT/BST) |
+| **Germany**     | `Europe/Berlin`       | Central European Time         |
+| **France**      | `Europe/Paris`        | Central European Time         |
+| **Japan**       | `Asia/Tokyo`          | Japan Standard Time           |
+| **China**       | `Asia/Shanghai`       | China Standard Time           |
+| **India**       | `Asia/Kolkata`        | India Standard Time           |
+| **Australia**   | `Australia/Sydney`    | Australian Eastern Time       |
+
+### Testing Timezone Configuration
+
+Use the config validator to verify timezone settings:
+
+```bash
+# Validate timezone configuration
+./config-validator -config config.yaml
+
+# Check timezone parsing
+./config-validator -config config.yaml | grep "Timezone:"
+```
